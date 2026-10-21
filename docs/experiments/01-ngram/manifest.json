@@ -1,0 +1,365 @@
+{
+  "source": "https://github.com/d2l-ai/d2l-en",
+  "revision": "23d7a5aecceee57d1292c56e90cce307f183bb0a",
+  "seed": 42,
+  "max_words_per_document": 1200,
+  "split_policy": "one validation and one test document per chapter; remainder training",
+  "documents": {
+    "train": [
+      {
+        "path": "chapter_preliminaries/ndarray.md",
+        "source_sha256": "b4bd8750d81c202c85c01505cf393cc6e70f2ea1e671b82a8d9f8d35f44f5a15",
+        "tokens_sha256": "fc88bb06677139cceb3af34b37b2d344ce3bd9d8c2d307afd447a507fe09267d",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_preliminaries/linear-algebra.md",
+        "source_sha256": "9da729424d50142267f032edee3d0ba0c117597be3692c366a78b58f1acf9a98",
+        "tokens_sha256": "f488e4b5096551c9da6e5a9088b0de45708d8492df4a9c370f85fc7b26ddd472",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_preliminaries/probability.md",
+        "source_sha256": "02b59c319786641678fee4edaf61d8fd038523f9d6764159a03d570e380121f1",
+        "tokens_sha256": "a609661120fef6c335b897ce9a074fb7f624c1651fc09bfecbd9aefdaee7ee7f",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_preliminaries/autograd.md",
+        "source_sha256": "8b27c572d217e118144fe8b52b336fbc4015cddfb7ac647e986407d115f54a91",
+        "tokens_sha256": "98e7dcea392c361cbe86fb514276d163eeb8ffd47a67c97a65255983d7186f92",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_preliminaries/pandas.md",
+        "source_sha256": "230318b507a258e3877a49c2abcecd3d69a109aab9f975294d868db6c24cb6b3",
+        "tokens_sha256": "aa8b95bcc4d40afcf1a0e1d48979373ce2d0dbbabbb12221ffb4f77db070ab68",
+        "word_count": 616
+      },
+      {
+        "path": "chapter_linear-regression/oo-design.md",
+        "source_sha256": "a908f1697bbc385b911689a734f7919229c3defd297e15ffb5699557996c41fc",
+        "tokens_sha256": "d0ed6f0eae7f220387916be56804fd37cabb2f947bbbc25544d0912f41d08669",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_linear-regression/generalization.md",
+        "source_sha256": "2090b8a2dc6a7b9d8d6f42f0aeaaad9ba76c59680ada6fb6ecef8160ac5122d6",
+        "tokens_sha256": "1bbecce5f26df3d301ebb6ddeea407b5af15cdeb6f8101e99f327e1d9bcd2d8e",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_linear-regression/linear-regression.md",
+        "source_sha256": "c854c09f327abfec72b1d34a3e3c53e507514b28113d9e5798e30f9f2195cb49",
+        "tokens_sha256": "b5af84716bffd95ce94f996ed1d4c6d033030ab2f4c23ab323ce14e9e4d26f0a",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_linear-classification/classification.md",
+        "source_sha256": "6c68e6eeaeee4b9994c9751ea667ab38cdb906cabf3de40195a0b37b7c5da305",
+        "tokens_sha256": "eeeb245d04396097cc065705891f8e6cca4b816901bf593e04264a6363a0a190",
+        "word_count": 583
+      },
+      {
+        "path": "chapter_linear-classification/image-classification-dataset.md",
+        "source_sha256": "207461b602cb42ea6aa4e99bf2e4945f62bf92575a2ca66699e2211da345f05d",
+        "tokens_sha256": "71bd89807321b52d459736fa23ee712d51798bb7b0fa5b1005fe8946e02a95e9",
+        "word_count": 931
+      },
+      {
+        "path": "chapter_linear-classification/softmax-regression.md",
+        "source_sha256": "82c997368fa3003b2d8e44742da8e3bf4459ee7f1d24caba4e358f95166366b7",
+        "tokens_sha256": "bd4e49275b0fa304c07158d3467fa21568dbb2deda9797ae24bff4d8c25bbdb1",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_multilayer-perceptrons/generalization-deep.md",
+        "source_sha256": "25463e3c34bcc764baf3f6f44a8ff98b638d2576be4e22761b4f3f7babe528a0",
+        "tokens_sha256": "6e8560209525d62dd110f37280d3e66dcdd508d35435c850630c4febe9f8d841",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_multilayer-perceptrons/numerical-stability-and-init.md",
+        "source_sha256": "0a53effb2fa59ca8b6edb6d3c46a7b35b40e5117ad96393f7ff84602342d9448",
+        "tokens_sha256": "ad9fe30a7133a86baa4ad284290771071b3a2296bc1ca1e88d3b43e7f737b7ac",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_multilayer-perceptrons/mlp.md",
+        "source_sha256": "e15c9e2ca430b549e506c1f53247eebd3f45f91681a68bd025721aebfd46ca6e",
+        "tokens_sha256": "11742f8510793dc9b2895d06ac13d754cdc18f721fcc3b8be4297c829fd71f13",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_multilayer-perceptrons/dropout.md",
+        "source_sha256": "e5fd93ac9cca9ad6a563f216df28af485ea885b07a4f8e0ce874c5045a619cd3",
+        "tokens_sha256": "ce47a43f1decc7dcc0f1e9bb3d8f4ce401f351253eeda0dea9f5d963e47391a7",
+        "word_count": 1096
+      },
+      {
+        "path": "chapter_multilayer-perceptrons/backprop.md",
+        "source_sha256": "665535325bff4f8ee3af5ac030388ccbbf7c4c95e56ef72a217b453bc9d72127",
+        "tokens_sha256": "cbe55335dc0dfba4beeb9eea83cec622b3b33c1e6c3762091ca591a9fc2d802e",
+        "word_count": 1189
+      },
+      {
+        "path": "chapter_convolutional-neural-networks/channels.md",
+        "source_sha256": "3c2cc261f2351a373861af2582104addb9013bb0d222013af6d16b0749fc49dc",
+        "tokens_sha256": "bfcbb471cd2dbb455b726c85e6fb1665a0452447abdc9ce271ab2349bf85c151",
+        "word_count": 1185
+      },
+      {
+        "path": "chapter_convolutional-neural-networks/padding-and-strides.md",
+        "source_sha256": "c0fec95a1a9e9e1b660f98f27b876e7caa3a53932601e5c5c9bb81be45b8e5d2",
+        "tokens_sha256": "0be62b25e6677e843a2d784d888b4051b15d048ca3d47f4606c28059d7323d77",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_convolutional-neural-networks/pooling.md",
+        "source_sha256": "57b031b5fe27e3b398ebc5857506e8034f2df2b47a8f2351a9e4ed22019d2d89",
+        "tokens_sha256": "6739b4c9d2e54bf4668a2bdb062ebf5ad741a61f72073924594120cd6e0201ac",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_convolutional-neural-networks/why-conv.md",
+        "source_sha256": "0fa140a9d25c984a7a41578dbd1a96a1aaa9ea0b35c297d581edff4a737e24ef",
+        "tokens_sha256": "14d101688d54e727399139946654c639e731a1ac3de7b18fe0cc8aa503960ccc",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_recurrent-neural-networks/bptt.md",
+        "source_sha256": "fb24d5bc9a0f7a6847143f2e5af445bfa0acce2573a8d62bf981fc2986776448",
+        "tokens_sha256": "e1d16e621ffecbb5d81d41618e00434db08160e327793733a906965c66ac39e1",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_recurrent-neural-networks/rnn.md",
+        "source_sha256": "cfa3068a1ff226b281c7743e7d852896486fcf797d4a9341f0dee70be92f161d",
+        "tokens_sha256": "d77d2488fccd2697fd853a8530413aa81bc8e9f7a53bad9de898a16157d5e60a",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_recurrent-neural-networks/text-sequence.md",
+        "source_sha256": "0ca5946606545695c5fd1a89ad76b37bb6efa2f106dd745dccc35810094e2566",
+        "tokens_sha256": "e1b2f8832eb5375576450873377c18e84e0f563373f8ced9c168b183a75d361e",
+        "word_count": 1054
+      },
+      {
+        "path": "chapter_recurrent-modern/encoder-decoder.md",
+        "source_sha256": "ad89663c337fc3aed42c26fb53365bb249a33ac96e45828adfb9ae0072cd0b05",
+        "tokens_sha256": "2e8129fc56bb9379364e14ffef050576491ca1738563897fcd4793779c1e35b3",
+        "word_count": 403
+      },
+      {
+        "path": "chapter_recurrent-modern/gru.md",
+        "source_sha256": "c7b6aaf75edac5e5d80dba8e77d482cf700b6ba3213427472871ea479c74465a",
+        "tokens_sha256": "78bda1dbf50dacbcd384e2afbe919aa6d75cefb522659aa7b0aa35fbac8f4a98",
+        "word_count": 781
+      },
+      {
+        "path": "chapter_recurrent-modern/bi-rnn.md",
+        "source_sha256": "6de8c8124497b0c69703ba3805559d51eb57c96d93096b70e2d5b6e133373975",
+        "tokens_sha256": "a01b4344b07561dc18d6ad694962c906a1b393c3785fc77db82c8310969bdb7d",
+        "word_count": 629
+      },
+      {
+        "path": "chapter_recurrent-modern/seq2seq.md",
+        "source_sha256": "4a8968fc425166377153fd749b359411455918496498ab3c98374a7b367b6c04",
+        "tokens_sha256": "711cbd2daf385d11ca7431c1d6a00ccfe6d75a630ed3fec994a26091e8ee4ac0",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_recurrent-modern/deep-rnn.md",
+        "source_sha256": "eac7791ce4773f0d822a5ab254bf1edf527143dc4b3bd88f2566d5b8c92a525e",
+        "tokens_sha256": "ab2ad5be1f5930d671e15d06f95adf342de86dc900b2d8b42dddfaec6bec7972",
+        "word_count": 800
+      },
+      {
+        "path": "chapter_recurrent-modern/machine-translation-and-dataset.md",
+        "source_sha256": "f23f1cbc9bc70a27affe6e3aee611db3014c3767899c50c72c4b0ef50cd645f9",
+        "tokens_sha256": "0cdc88e9a67f906cd0c87de09ca1c0bddfb9b920047a1f075b22e1ab50ea1d6b",
+        "word_count": 967
+      },
+      {
+        "path": "chapter_attention-mechanisms-and-transformers/transformer.md",
+        "source_sha256": "085f66181f137620d27b61eabfeefe3927258abaabdf2693a8887bb186415c82",
+        "tokens_sha256": "57a1d654d1fdb533ec8377ff94a6998828b40d1d22f264650e934440304acc0e",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_attention-mechanisms-and-transformers/multihead-attention.md",
+        "source_sha256": "97404b61a99bcb29ae18ad64147562244f803ac6af2bd5b17b3e3cba8e80a108",
+        "tokens_sha256": "c30f8e4b207220ed366a350a0637529c2b4fd9f5e8fb809e0b82289f5dc3b630",
+        "word_count": 402
+      },
+      {
+        "path": "chapter_attention-mechanisms-and-transformers/queries-keys-values.md",
+        "source_sha256": "880642f004c40c95fc5ecc0b6dee98aedb5fc014ab814bbff35838441de12c8d",
+        "tokens_sha256": "e08e5d8cf84fc175ae83264345513d091ba07080466127b67f5160fa0eaba4bb",
+        "word_count": 1128
+      },
+      {
+        "path": "chapter_attention-mechanisms-and-transformers/bahdanau-attention.md",
+        "source_sha256": "8e4a4c470f0426475f4f0fc45821c52a0e244dd6171f439504084d2aa6013ab9",
+        "tokens_sha256": "fe25b4acde8df53351348c4200652a0e819f83fe7f2fbc44650bf4f9f08294cb",
+        "word_count": 966
+      },
+      {
+        "path": "chapter_attention-mechanisms-and-transformers/attention-pooling.md",
+        "source_sha256": "e8701fde7ec437764fbb990c87999731a748ec014dd71366ad5d1bebcc0c9d2a",
+        "tokens_sha256": "62a58cef129742a8e7b042854b608cf35260b668287f8d5518975600fb924724",
+        "word_count": 852
+      },
+      {
+        "path": "chapter_attention-mechanisms-and-transformers/self-attention-and-positional-encoding.md",
+        "source_sha256": "8b6eeedba841fbd231edaa5f0f1524bf17c82449623bd2e46f8da21a0cead35f",
+        "tokens_sha256": "24dd5ebbdbf950aba03477f01be49b79b7db0fcb555acc518f6a330e22982546",
+        "word_count": 1078
+      },
+      {
+        "path": "chapter_attention-mechanisms-and-transformers/attention-scoring-functions.md",
+        "source_sha256": "0ff7897c34919301660855ae6820173b657dd28926f7de4ae3ec527454c4285d",
+        "tokens_sha256": "7425581c941ce0e840aa3eea823071cd58b988d28a50824051312f1bd205a5e2",
+        "word_count": 1200
+      }
+    ],
+    "validation": [
+      {
+        "path": "chapter_preliminaries/calculus.md",
+        "source_sha256": "a325c626fd77f5be37d32579cd0a5cf4a75c9179c995bce08baa487e05026419",
+        "tokens_sha256": "43451e72b0f52f11304c2f76dc2a665f22963e97c78a45a3f22e03f93db20ed8",
+        "word_count": 1157
+      },
+      {
+        "path": "chapter_linear-regression/weight-decay.md",
+        "source_sha256": "081edd89fc50afb5049df925e82d7a33ea485f4cf1ee6ed28c78f30829b5f388",
+        "tokens_sha256": "d926c314e298d0a26e37386d7cd6407da6b2aa639694ca0f86e2aecdbd40c792",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_linear-classification/environment-and-distribution-shift.md",
+        "source_sha256": "524c1ae014be3b2ba046eea1dd22cc180120dafed13285f0f5dd6f6223cb4e57",
+        "tokens_sha256": "3eddafa9967e5f7e2492307989714482f8ed9faa756f214851e8f51381c47384",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_multilayer-perceptrons/mlp-implementation.md",
+        "source_sha256": "b9ef3697ad5d78b6212fc841ac5ecb54cdae8705b7f3a4ceb5cfa002161b6601",
+        "tokens_sha256": "1bc02bbffa0f4694133bdbc43d3be42e0477a8a8921a94204249d21915861321",
+        "word_count": 716
+      },
+      {
+        "path": "chapter_convolutional-neural-networks/lenet.md",
+        "source_sha256": "6dfaae50762199fa53bc5fac21ba72f53a69de576fd5bd38a93d3d3a5b7f6701",
+        "tokens_sha256": "2ec00ccadd2b0579baaa217db0d05f12827b3587a64c97d0c3097e76aa0283e8",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_recurrent-neural-networks/language-model.md",
+        "source_sha256": "19b60293fdc8f6546d24f53e528381ec0bdd99bce40ce118f2d5ac61a911e18f",
+        "tokens_sha256": "28722a3481f5feed6925d52febdc19bdae05315405749ee7cd323f082d3ac8d8",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_recurrent-modern/lstm.md",
+        "source_sha256": "66a0dc190a4641d4e17bb14f8ad57cb066a46f1ee4f472a45a3138c588008614",
+        "tokens_sha256": "4aec4a3cac43a2e4d8322a12158f941b4c5d480686c49cc044788ffff3f5eb6d",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_attention-mechanisms-and-transformers/large-pretraining-transformers.md",
+        "source_sha256": "814e0187a10e790822da4783a6d68efdaf58943f4f352788a2a410748347d419",
+        "tokens_sha256": "c9094c5dd93d3ead357b30944bf2cc24d7c39741d021f994d722373f2dd7dcc9",
+        "word_count": 1200
+      }
+    ],
+    "test": [
+      {
+        "path": "chapter_preliminaries/lookup-api.md",
+        "source_sha256": "53ae38f6f8166b94108a7bb9ef9fc48d55f0186ba2d27df1634e117bf0d43b89",
+        "tokens_sha256": "3328225d7e909dc706ebe7ed1a8bc29a1c0b6348c17272f19a0251156d308b10",
+        "word_count": 415
+      },
+      {
+        "path": "chapter_linear-regression/synthetic-regression-data.md",
+        "source_sha256": "a066643434ed32763ee1268d84da38eadd2aaba1c5ceb092d9f8526b09449b83",
+        "tokens_sha256": "006f9d0417ba160dda923b8e551efa963a71a1b458c5fcb87c98eafabde47aee",
+        "word_count": 885
+      },
+      {
+        "path": "chapter_linear-classification/generalization-classification.md",
+        "source_sha256": "e525245cc636ceb978f077ad289a5a5d4e4d8e1e0ae0b47a86ed5966f63432a3",
+        "tokens_sha256": "a9971371d8a37d67afcbdeabaa470a37754375c9c291b8db8129d58dc8501891",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_multilayer-perceptrons/kaggle-house-price.md",
+        "source_sha256": "cd97e55d12bfab80d4ec185c1b719e7c87733954ed93ac0067be86c806d18caa",
+        "tokens_sha256": "42726e0e10dcc320cbc8a64751ef5f85ebacda97e45da6ee02d20449e0275e9e",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_convolutional-neural-networks/conv-layer.md",
+        "source_sha256": "5f41b0ebf6844a96372e103e3dd0efe0341ea959532896a340be13d0c8c23275",
+        "tokens_sha256": "80a798f6c27a77be83851c6a6c4f1810fbbf33aac682c258d8bf28500b2d4975",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_recurrent-neural-networks/sequence.md",
+        "source_sha256": "081422a2ae56a90198f75a0798b1f61b2a71ab2a8c7d36902dc87872f0320cac",
+        "tokens_sha256": "a9d2e0eff22da637323c177820f4ef27719c3a977d13577901e819ae0180bc87",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_recurrent-modern/beam-search.md",
+        "source_sha256": "b71d99c04c00dc5393991c6df4d36971e6d54e39853b01b200d4a2f038a3a833",
+        "tokens_sha256": "0862f50167dfbb2dd9be0f84e5df0144fd4fd34c37ca5b2c631e22ee50b1e1e0",
+        "word_count": 1180
+      },
+      {
+        "path": "chapter_attention-mechanisms-and-transformers/vision-transformer.md",
+        "source_sha256": "290574b82b91f9efca4f90bb56d29a76db2de85666db5d1e38850cdf32709e07",
+        "tokens_sha256": "c81d6841d76596956b8ddddbc20c2efd5720f66b8d71dbe6047e0be49ff9b1a1",
+        "word_count": 899
+      }
+    ],
+    "topic_shift": [
+      {
+        "path": "chapter_computational-performance/async-computation.md",
+        "source_sha256": "285c8c8d4a2a656a2f17bd7d56d3bbf54f2976ab2a143240514d47a97739bad6",
+        "tokens_sha256": "fba68d4504ef296f5ab24b842a190ef6dc6fc25e146e3111edd9e9e7b9ebc19c",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_computational-performance/auto-parallelism.md",
+        "source_sha256": "0a407cf55b8c3589c544c63f7006827a9c672c51c6bf22843cfdabe877bc2590",
+        "tokens_sha256": "f6ee5f425fe60ca4d3319f258f01cb103c7d29df1d99d4774ca79ff13d7275d4",
+        "word_count": 911
+      },
+      {
+        "path": "chapter_computational-performance/hardware.md",
+        "source_sha256": "8fbfb39756481c9f4e6f672f9f61c8449b687a8038d9a2597457611ba2905719",
+        "tokens_sha256": "de382432338f2d91a4a33a0cdfb404ee3e0c839cc0dffdd8f97c6f52854e0b81",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_computational-performance/hybridize.md",
+        "source_sha256": "9108352a0582d5be03966b4d2a17d9040c8ce3c56e6a7087a84811940dda62ba",
+        "tokens_sha256": "e93165a2efec38e328bd1a1aee729704db6c30ee831f81f7e9ae515a86e2d7be",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_computational-performance/multiple-gpus.md",
+        "source_sha256": "f7b0efc657dc905b3d8175e7d3120ffe5698ce96d4fc25b1495dc0ddfbdcefe1",
+        "tokens_sha256": "32df6252cedfe1a54f92180d7a27918f45215729bce45f42fba1994865e564dd",
+        "word_count": 1200
+      },
+      {
+        "path": "chapter_computational-performance/parameterserver.md",
+        "source_sha256": "fb7fbbe9a53981e2f74667c07282f6168a7b75e5ad61957e3a5e8e9d82a6bb19",
+        "tokens_sha256": "84de84648e67dffe0e811f60f13c48133da5ef230c60d3169740186ef8dca46c",
+        "word_count": 1200
+      }
+    ]
+  }
+}

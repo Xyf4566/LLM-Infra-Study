@@ -1,0 +1,9 @@
+[submodule "refs/d2l-en"]
+	path = refs/d2l-en
+	url = https://github.com/d2l-ai/d2l-en.git
+[submodule "refs/cs336-2025"]
+	path = refs/cs336-2025
+	url = https://github.com/stanford-cs336/spring2025-lectures.git
+[submodule "refs/gpu-mode-lectures"]
+	path = refs/gpu-mode-lectures
+	url = https://github.com/gpu-mode/lectures.git
