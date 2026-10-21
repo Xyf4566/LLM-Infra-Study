@@ -11,6 +11,7 @@
 | `d2l-en/` | [Dive into Deep Learning](https://github.com/d2l-ai/d2l-en) | 语言模型、神经网络、注意力的基础推导与练习 | `23d7a5aecceee57d1292c56e90cce307f183bb0a` |
 | `cs336-2025/` | [Stanford CS336 Spring 2025 lectures](https://github.com/stanford-cs336/spring2025-lectures) | 语言模型、训练、数据、推理与系统的课程主线 | `b98b08a98d9d47a69bbdcb4e96a58aa48ee4d13b` |
 | `gpu-mode-lectures/` | [GPU MODE lectures](https://github.com/gpu-mode/lectures) | GPU 性能分析、CUDA/Triton、算子、通信与工程案例 | `77a8df418834e5789c12da23e7d2719e0efabef1` |
+| `InfraTech/` | [InfraTech](https://github.com/CalvinXKY/InfraTech) | 训练与推理框架、模型架构、性能分析及 Notebook 实践 | `48e358a4b5119c24cf472adc64d0b4f86f894e99` |
 
 首次获取本仓库及全部参考资料：
 
@@ -27,6 +28,14 @@ git submodule update --init --recursive
 该命令检出主仓库记录的固定版本，便于复现实验。
 
 CS336 克隆的是 2025 年课程讲义，不包含另外发布的作业仓库。GPU MODE 克隆的是讲座补充材料，视频和部分外链资料需单独访问。课程里的软件安装方式与硬件要求按对应实验核对。
+
+## InfraTech 阅读入口
+
+- [MLP 训练全流程](InfraTech/deeplearning_framework/mini_dl_framework.ipynb)：前向计算、反向传播与参数更新。
+- [集合通信](InfraTech/deeplearning_framework/collective_operations.ipynb)：分布式训练与推理的通信基础。
+- [推理练习](InfraTech/llm_infer/README.md)：采样、KV cache、投机解码、调度及推理框架。
+- [模型架构](InfraTech/models/README.md)：主流模型的结构与计算流程。
+- [共享资料](InfraTech/docs/README.md)：AI Infra 相关资料。
 
 ## 第一章阅读入口
 

@@ -42,3 +42,9 @@
 5. 实验比较不同上下文长度、数据量和加性平滑强度，解释泛化与存储成本。
 
 正文见 [第一章](01-language-modeling.md)，配套 [交互演示](visuals/01-language-modeling.html)、[实验 Notebook](../experiments/01-ngram/ngram.ipynb) 和 [实验结果](experiments/01-ngram/README.md)。
+
+## 第二章：神经语言模型
+
+正文见 [第二章](02-neural-language-models.md)，配套 [前向计算 Notebook](../experiments/02-neural-lm/forward.ipynb)。
+
+固定窗口 MLP → 参数共享与 embedding → softmax 与梯度 → 小模型训练 → RNN/LSTM。

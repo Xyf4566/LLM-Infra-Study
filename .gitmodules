@@ -7,3 +7,6 @@
 [submodule "refs/gpu-mode-lectures"]
 	path = refs/gpu-mode-lectures
 	url = https://github.com/gpu-mode/lectures.git
+[submodule "refs/InfraTech"]
+	path = refs/InfraTech
+	url = https://github.com/CalvinXKY/InfraTech.git
