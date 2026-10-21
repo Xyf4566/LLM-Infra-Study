@@ -4,8 +4,9 @@
 
 - [第一章：n-gram、平滑与泛化](01-ngram/ngram.ipynb)
 - [第二章：神经语言模型前向计算](02-neural-lm/forward.ipynb)
+- [第二章：输出层反向传播](02-neural-lm/backward.ipynb)
 
-两份 Notebook 均保存已执行的输出和图表，可直接阅读；要调整参数，在 Jupyter 中重新运行单元。
+Notebook 将讲解、代码与运行输出组织在一起；要调整参数，在 Jupyter 中重新运行单元。
 
 ## 本地启动
 
