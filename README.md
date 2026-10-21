@@ -8,3 +8,5 @@
 - [Jupyter 实验索引](experiments/README.md)
 - [第一章实验：上下文长度与平滑](docs/experiments/01-ngram/index.html)
 - [实验复现](experiments/01-ngram/README.md)
+
+会话历史保存在根目录 [conversation_history.json](conversation_history.json)，后续收录学习问答、推导与实验讨论。
