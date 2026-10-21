@@ -411,7 +411,7 @@ for word in ["数学", "编程", "物理"]:
 
 ### 1.5.4 实验：上下文长度与平滑强度
 
-[实验 Notebook](../experiments/01-ngram/ngram.ipynb) · [运行说明](../experiments/01-ngram/README.md) · [静态图表](experiments/01-ngram/index.html) · [完整结果](experiments/01-ngram/README.md)
+[实验 Notebook](../experiments/01-ngram/ngram.ipynb) · [运行说明](../experiments/01-ngram/README.md) · [静态图表](../experiments/01-ngram/results/index.html) · [完整结果](../experiments/01-ngram/results/README.md)
 
 使用 D2L 英文讲义正文，按文件划分为 36 篇训练文档、8 篇验证文档、8 篇测试文档。每篇最多 1,200 个词，词表只从训练集建立，共 2,077 个 token；低频词和词表外词映射为 UNK。文档边界重置，所有词和 EOS 使用相同评分规则。
 
@@ -426,7 +426,7 @@ $$
 
 这里 $\alpha$ 是虚拟计数总量，两种方法使用相同定义。
 
-![训练验证损失与平滑强度](experiments/01-ngram/loss-curves.png)
+![训练验证损失与平滑强度](../experiments/01-ngram/results/loss-curves.png)
 
 固定递归插值的 $\alpha=1$，得到：
 

@@ -141,7 +141,7 @@ def write_report(result, output):
         lines.append(f"| {stats['k']} | {stats['contexts']} | {stats['transitions']} | {stats['cumulative_transitions']} |")
     lines += ["", "![常见词转移概率](transitions.png)", "",
               "热力图只显示 12 个常见词，分母仍包含完整词表，因此可见行的概率之和可以小于 1。", "",
-              "## 复现", "", "主要入口：[实验 Notebook](../../../experiments/01-ngram/ngram.ipynb)；运行方式见 [实验说明](../../../experiments/01-ngram/README.md)。",
+              "## 复现", "", "主要入口：[实验 Notebook](../ngram.ipynb)；运行方式见 [实验说明](../README.md)。",
               "完整数值见 [results.json](results.json)，语料文件及校验和见 [manifest.json](manifest.json)。", "",
               "数据来源：[Dive into Deep Learning](https://github.com/d2l-ai/d2l-en)，作者 Aston Zhang、Zachary C. Lipton、Mu Li、Alexander J. Smola 及贡献者。",
               f"固定版本：`{result['source_revision']}`；原文许可：[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)。", ""]
@@ -152,14 +152,14 @@ def write_report(result, output):
 <style>body{{margin:0;background:#f3f6fa;color:#17304b;font:17px/1.8 system-ui,sans-serif}}main{{max-width:1120px;margin:auto;padding:24px}}section{{background:white;border:1px solid #dce4ed;border-radius:14px;padding:24px;margin:20px 0}}h1{{font-size:30px}}h2{{font-size:23px}}img{{width:100%;height:auto}}a{{color:#2961c7}}.metrics{{display:flex;gap:16px;flex-wrap:wrap}}.metrics div{{background:#edf3fc;padding:14px 22px;border-radius:8px}}strong{{font-size:26px}}@media(max-width:600px){{main{{padding:12px}}section{{padding:14px}}}}</style></head>
 <body><main><h1>上下文越长，预测就越好吗？</h1>
 <p>D2L 讲义 · {result['data']['train']['documents']} 篇训练文档 · {result['vocabulary_size']} 个 token · CPU 计数模型</p>
-<p><a href="../../01-language-modeling.md">第一章正文</a> · <a href="README.md">实验设置与数据表</a></p>
+<p><a href="../../../docs/01-language-modeling.md">第一章正文</a> · <a href="README.md">实验设置与数据表</a></p>
 <section><h2>训练拟合与验证表现</h2><p>上图固定 α = 1；下图比较不同平滑强度。NLL 越低越好。</p><a href="loss-curves.png"><img src="loss-curves.png" alt="两种平滑方法的训练验证曲线与验证损失热力图"></a></section>
 <section><h2>更具体的上下文，有多少样本支持？</h2><a href="sparsity.png"><img src="sparsity.png" alt="不同上下文长度的样本数分布和验证未见组合比例"></a></section>
 <section><h2>验证集选择的模型</h2><p>{method_cn[best['method']]} · k = {best['k']} · α = {best['alpha']:g}</p>
 <div class="metrics"><div>验证 NLL<br><strong>{best['validation']['nll']:.3f}</strong></div><div>测试 NLL<br><strong>{result['test']['nll']:.3f}</strong></div><div>计算性能主题 NLL<br><strong>{result['topic_shift']['nll']:.3f}</strong></div></div>
 <p>使用同一词表与评分规则；测试集和计算性能主题文档不参与模型选择。</p></section>
 <section><h2>词语之间的转移统计</h2><a href="transitions.png"><img src="transitions.png" alt="训练语料中十二个常见词的转移概率"></a><p>图中展示词表的一个子集，概率分母包含全部候选词。</p></section>
-<p><a href="../../../experiments/01-ngram/ngram.ipynb">实验 Notebook</a> · <a href="../../../experiments/01-ngram/README.md">复现说明</a> · <a href="results.json">完整结果</a> · <a href="manifest.json">语料清单</a></p>
+<p><a href="../ngram.ipynb">实验 Notebook</a> · <a href="../README.md">复现说明</a> · <a href="results.json">完整结果</a> · <a href="manifest.json">语料清单</a></p>
 </main></body></html>'''
     (output / "index.html").write_text(html, encoding="utf-8")
 
@@ -167,7 +167,7 @@ def write_report(result, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=ROOT / "refs/d2l-en")
-    parser.add_argument("--output", type=Path, default=ROOT / "docs/experiments/01-ngram")
+    parser.add_argument("--output", type=Path, default=ROOT / "experiments/01-ngram/results")
     args = parser.parse_args()
     raw, manifest = load_corpus(args.source)
     vocab = vocabulary(raw["train"], min_count=2)

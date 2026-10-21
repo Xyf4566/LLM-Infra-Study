@@ -68,7 +68,7 @@ UNK 将多个稀有词合并为一个预测目标；这些损失不等于完整�
 
 ## 复现
 
-主要入口：[实验 Notebook](../../../experiments/01-ngram/ngram.ipynb)；运行方式见 [实验说明](../../../experiments/01-ngram/README.md)。
+主要入口：[实验 Notebook](../ngram.ipynb)；运行方式见 [实验说明](../README.md)。
 完整数值见 [results.json](results.json)，语料文件及校验和见 [manifest.json](manifest.json)。
 
 数据来源：[Dive into Deep Learning](https://github.com/d2l-ai/d2l-en)，作者 Aston Zhang、Zachary C. Lipton、Mu Li、Alexander J. Smola 及贡献者。

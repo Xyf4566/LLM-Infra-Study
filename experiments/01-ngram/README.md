@@ -16,7 +16,7 @@ python experiments/01-ngram/run.py
 
 需要已克隆的 `refs/d2l-en`，固定提交为 `23d7a5aecceee57d1292c56e90cce307f183bb0a`；获取方法见 [参考资料](../../refs/README.md)。运行不需要联网下载语料。
 
-结果写入 [docs/experiments/01-ngram](../../docs/experiments/01-ngram/README.md)。打开其中的 [index.html](../../docs/experiments/01-ngram/index.html) 查看图表；Markdown、PNG、SVG 与 JSON 可分别阅读或导出。
+结果写入当前实验目录下的 [results/](results/README.md)。打开其中的 [index.html](results/index.html) 查看图表；Markdown、PNG、SVG 与 JSON 可分别阅读或导出。
 
 要保留已发布结果、在另一个目录重跑：
 

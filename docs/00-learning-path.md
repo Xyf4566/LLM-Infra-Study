@@ -41,7 +41,7 @@
 4. 从最大似然推导平均负对数似然、交叉熵和困惑度。
 5. 实验比较不同上下文长度、数据量和加性平滑强度，解释泛化与存储成本。
 
-正文见 [第一章](01-language-modeling.md)，配套 [交互演示](visuals/01-language-modeling.html)、[实验 Notebook](../experiments/01-ngram/ngram.ipynb) 和 [实验结果](experiments/01-ngram/README.md)。
+正文见 [第一章](01-language-modeling.md)，配套 [交互演示](visuals/01-language-modeling.html)、[实验 Notebook](../experiments/01-ngram/ngram.ipynb) 和 [实验结果](../experiments/01-ngram/results/README.md)。
 
 ## 第二章：神经语言模型
 
