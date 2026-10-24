@@ -1132,11 +1132,100 @@ $$
 
 以上输出与损失使用 CPU NumPy float64 核对；每步概率和为 1，逐步 NLL 的平均与条件概率乘积的负对数除以 2 一致。这是给定参数的前向计算，不是训练完成后的性能结果。
 
+### 2.6.3 BPTT：隐藏状态汇总当前步与未来步梯度
+
+跨时间反向传播（backpropagation through time，BPTT）是将 RNN 按时间展开，再对展开后的计算图使用链式法则。前向的状态连接 $h_1\to h_2$ 在反向成为未来损失影响早期状态的路径；反向遍历时间不意味着前向预测时读取未来 token。
+
+沿用 2.6.2 的两步计算和平均损失 $\mathcal J=(\ell_1+\ell_2)/2$。$h_1$ 通过当前输出影响 $\ell_1$，也通过 $h_2$ 影响 $\ell_2$，因此其总梯度包含两个分支。记 $g_{h_t}=\partial\mathcal J/\partial h_t$，对本例单隐藏坐标：
+
+$$
+g_{h_1}
+=\frac{\partial(\ell_1/2)}{\partial h_1}
++\frac{\partial(\ell_2/2)}{\partial h_2}
+\frac{\partial h_2}{\partial h_1}.
+$$
+
+两个有效目标的平均因子先放入 logits 梯度：
+
+$$
+g_{z_t}=\frac{q_t-r_t}{2},
+$$
+
+其中 $r_1$ 指向“喜欢”，$r_2$ 指向“数学”。以下全部贡献都已包含 $1/2$，汇总时不再重复平均。
+
+第二步是本例的最后一步，没有后续状态贡献。通过输出层：
+
+$$
+g_{h_2}=g_{z_2}W_o^\top
+=\frac12\left(\sum_j q_{2,j}(W_o)_j-0.8\right)
+\approx-0.263504.
+$$
+
+这里的 $0.8$ 是输出权重中“数学”对应的元素，不是因为循环权重恰好也为 $0.8$。
+
+对递归状态 $a_2=e_2W_x+h_1W_h+b_h$、$h_2=\tanh(a_2)$，其局部导数为：
+
+$$
+\frac{\partial h_2}{\partial h_1}
+=(1-h_2^2)W_h
+\approx0.734637\times0.8
+\approx0.587709.
+$$
+
+因此未来步对 $h_1$ 的贡献为：
+
+$$
+g_{h_1}^{\mathrm{future}}
+=g_{h_2}(1-h_2^2)W_h
+\approx(-0.263504)(0.587709)
+\approx-0.154864.
+$$
+
+当前步输出分支的贡献则为：
+
+$$
+g_{h_1}^{\mathrm{current}}
+=g_{z_1}W_o^\top
+=\frac12\left(\sum_j q_{1,j}(W_o)_j-0.1\right)
+\approx+0.080333.
+$$
+
+这里减去 $0.1$，因为第一步真实目标是“喜欢”，其输出权重为 $0.1$。最终：
+
+$$
+\boxed{
+g_{h_1}
+=g_{h_1}^{\mathrm{current}}+g_{h_1}^{\mathrm{future}}
+\approx0.080333-0.154864
+\approx-0.074531
+}.
+$$
+
+```mermaid
+flowchart TD
+    L1["ℓ₁ / 2：当前步"] --> C["经过当前输出层<br/>+0.080333"]
+    L2["ℓ₂ / 2：未来步"] --> H2["g_h₂ = -0.263504"]
+    H2 --> F["乘 (1 − h₂²) W_h<br/>贡献 -0.154864"]
+    C --> SUM["在 h₁ 汇总<br/>g_h₁ = -0.074531"]
+    F --> SUM
+```
+
+图中的箭头表示反向梯度贡献，不是前向信息流。若漏掉未来分支，本例的 $h_1$ 梯度不仅大小错误，连符号也相反。将 $h_1$ 作为计算图内部的扰动变量，固定参数并重算所有下游节点时，微小增加 $h_1$ 会增加当前项 $\ell_1/2$，但降低未来项 $\ell_2/2$ 的作用更大，因此总损失局部下降。这不是直接将 $h_1$ 作为独立参数执行 SGD；模型仍需将梯度继续传向产生状态的参数和输入表示。
+
+反向可先处理末步，再逐步向前汇总。对更长序列，来自下一状态的梯度已包含其后所有损失的贡献；不是只考虑相邻两项损失。各分支先相加，再穿过当前状态自身的 tanh：
+
+$$
+g_{a_1}=g_{h_1}(1-h_1^2)\approx-0.058615.
+$$
+
+本节数值使用 CPU NumPy float64 计算。对 $h_1$ 施加步长 $10^{-5}$ 的中心差分扰动、重算 $h_2$ 及两个输出分支，当前与未来两项的解析梯度分别与数值梯度相符，最大绝对误差低于 $10^{-10}$。验证对象是状态节点的下游导数，不是完整 RNN 参数梯度检查。
+
 ## 参考资料
 
 - [Bengio 等：A Neural Probabilistic Language Model（2003）](https://www.jmlr.org/papers/v3/bengio03a.html)
 - [D2L：多层感知机](https://github.com/d2l-ai/d2l-en/blob/23d7a5aecceee57d1292c56e90cce307f183bb0a/chapter_multilayer-perceptrons/mlp.md)
 - [D2L：Softmax 与交叉熵的导数](../refs/d2l-en/chapter_linear-classification/softmax-regression.md)：2.4.1 的损失展开与梯度推导。
 - [D2L：循环神经网络](../refs/d2l-en/chapter_recurrent-neural-networks/rnn.md)：隐藏状态、递归更新与跨时间步参数共享。
+- [D2L：跨时间反向传播](../refs/d2l-en/chapter_recurrent-neural-networks/bptt.md)：时间展开与共享参数的梯度汇总。
 - [D2L：词向量](https://github.com/d2l-ai/d2l-en/blob/23d7a5aecceee57d1292c56e90cce307f183bb0a/chapter_natural-language-processing-pretraining/word2vec.md)（本节先读向量表示部分）
 - [CS336 Lecture 2：张量、梯度与训练](https://github.com/stanford-cs336/spring2025-lectures/blob/b98b08a98d9d47a69bbdcb4e96a58aa48ee4d13b/lecture_02.py)
