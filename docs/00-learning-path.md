@@ -48,3 +48,9 @@
 正文见 [第二章](02-neural-language-models.md)，配套 [前向计算 Notebook](../experiments/02-neural-lm/forward.ipynb)。
 
 固定窗口 MLP → 参数共享与 embedding → softmax 与梯度 → 小模型训练 → RNN/LSTM。
+
+## 第三章：Transformer
+
+正文见 [第三章](03-transformers.md)。
+
+循环状态的局限 → 按需读取与自注意力 → Q/K/V → 因果掩码与多头注意力 → 残差、归一化与 FFN → 位置信息 → decoder-only 语言模型及基础计算、存储成本。
