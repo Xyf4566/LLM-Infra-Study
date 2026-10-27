@@ -547,6 +547,141 @@ flowchart LR
 
 Pre-LN 保留从输入到加法输出的恒等路径，归一化位于变换分支内；Post-LN 的加法输出还要经过归一化，其梯度也要经过 LayerNorm，不能把加法节点的直通性质当作整个模块的性质。两者中的逐 token LayerNorm 都不直接读取未来位置。RMSNorm 等变体留待后续现代架构讨论。
 
+### 3.5.3 逐位置 FFN：共享 MLP 对特征做非线性变换
+
+注意力跨位置汇总信息；逐位置前馈网络（positionwise FFN）对每个位置已有的表示应用同一个 MLP。FFN 不直接混合不同 token，但其输入已经可以包含注意力读入的上下文。一个模块的参数在所有样本、位置之间共享，不同 Transformer 层通常使用不同的 FFN 参数。
+
+对行向量 $\mathbf z_i\in\mathbb R^{1\times d_{\mathrm{model}}}$，基本两层 FFN 为：
+
+$$
+\mathbf a_i=\mathbf z_iW_{\mathrm{up}}+\mathbf b_{\mathrm{up}},\quad
+\mathbf h_i=\phi(\mathbf a_i),\quad
+\mathbf f_i=\mathbf h_iW_{\mathrm{down}}+\mathbf b_{\mathrm{down}}.
+$$
+
+其中 $W_{\mathrm{up}}\in\mathbb R^{d_{\mathrm{model}}\times d_{\mathrm{ff}}}$、$\mathbf b_{\mathrm{up}}\in\mathbb R^{d_{\mathrm{ff}}}$、$W_{\mathrm{down}}\in\mathbb R^{d_{\mathrm{ff}}\times d_{\mathrm{model}}}$、$\mathbf b_{\mathrm{down}}\in\mathbb R^{d_{\mathrm{model}}}$。$d_{\mathrm{ff}}$ 是 FFN 隐藏宽度，与 token 数、头数和词表大小不同；通常取大于模型宽度，但不是数学必需条件。本节采用 $\phi(u)=\max(0,u)$，即逐元素 ReLU。
+
+沿用 3.5.2 的 Post-LN 中间结果，选择 $\gamma=[1,1],\beta=[0,0]$，第三个位置输入为 $\mathbf z_3\approx[-0.999816,0.999816]$。设置模型宽度 2、FFN 隐藏宽度 4：
+
+$$
+W_{\mathrm{up}}=
+\begin{bmatrix}1&-1&1&0\\0&1&1&1\end{bmatrix},
+\qquad
+\mathbf b_{\mathrm{up}}=[0.1,0,0.2,-0.5].
+$$
+
+得到：
+
+$$
+\mathbf a_3\approx[-0.899816,1.999631,0.2,0.499816],
+\quad
+\mathbf h_3\approx[0,1.999631,0.2,0.499816].
+$$
+
+再设置：
+
+$$
+W_{\mathrm{down}}=
+\begin{bmatrix}
+0.5&0\\0.2&-0.1\\-0.5&0.5\\0.1&0.3
+\end{bmatrix},
+\qquad \mathbf b_{\mathrm{down}}=[0,0.1],
+$$
+
+得到 FFN 分支输出：
+
+$$
+\mathbf f_3\approx[0.349908,0.149982].
+$$
+
+本例计算从上一节保留八位小数的残差输入重新计算 LayerNorm，使用未舍入的标准化结果继续前向。$\mathbf f_3$ 是中间特征修正，不是词表概率，也尚未进行 FFN 外侧的残差与归一化。
+
+```mermaid
+flowchart LR
+    Z1["位置 1：z₁"] --> F1["同一 FFN<br/>2 → 4 → 2"] --> O1["f₁"]
+    Z2["位置 2：z₂"] --> F2["同一 FFN<br/>2 → 4 → 2"] --> O2["f₂"]
+    Z3["位置 3：z₃"] --> F3["同一 FFN<br/>2 → 4 → 2"] --> O3["f₃"]
+```
+
+图中三次调用共享一套权重与偏置，位置之间没有 FFN 内部的数据传递。扩张的是特征数，不是位置数。输入若为 $B\times T\times d_{\mathrm{model}}$，隐藏张量为 $B\times T\times d_{\mathrm{ff}}$，输出恢复为 $B\times T\times d_{\mathrm{model}}$。实现时可将前两轴展平为 $BT$ 行，一起进行矩阵乘法；参数和语义不变。
+
+去掉激活后：
+
+$$
+(\mathbf zW_{\mathrm{up}}+\mathbf b_{\mathrm{up}})W_{\mathrm{down}}+\mathbf b_{\mathrm{down}}
+=
+\mathbf z(W_{\mathrm{up}}W_{\mathrm{down}})
++\mathbf b_{\mathrm{up}}W_{\mathrm{down}}+\mathbf b_{\mathrm{down}},
+$$
+
+仍是一个仿射变换。激活使 FFN 不再能一般地合并成单个仿射层。这个论断针对 FFN，注意力的 softmax 自身已经是非线性的，不能据此声称 Transformer 仅靠 FFN 才有非线性。
+
+含两项偏置的基本 FFN 参数量为 $2d_{\mathrm{model}}d_{\mathrm{ff}}+d_{\mathrm{ff}}+d_{\mathrm{model}}$，本例为 22，不随样本数或序列长度增加。共享参数训练时汇总各位置的梯度；固定参数的逐行独立性不意味着更新参数后其他行预测不受影响。该逐位置分支不会额外读取未来 token。
+
+CPU NumPy float64 核对了数值前向、整矩阵与逐行调用的一致性、只修改第三行输入时前两行输出不变，以及去掉激活后的仿射合并等式。未进行训练实验。
+
+### 3.5.4 组合完整的因果 Transformer block
+
+本节组合 decoder-only 路线中的因果自注意力与 FFN，不含 encoder-decoder cross-attention。D2L 的原始 encoder-decoder 解码器还包含交叉注意力，不应将两种结构混为一谈。为突出数据流，省略 dropout；位置机制和词表输出头另行讨论。
+
+Post-LN block 包含两个子层，每个子层各有一条残差连接与一个 LayerNorm：
+
+$$
+U=\operatorname{LN}_1\left(X+\operatorname{MHA}_{\mathrm{causal}}(X)\right),
+$$
+
+$$
+Y=\operatorname{LN}_2\left(U+\operatorname{FFN}(U)\right).
+$$
+
+第二条残差使用 FFN 子层的输入 $U$，不是整个 block 的原始输入 $X$。两者形状相同，误用 $X$ 可能不会引发形状错误，却会改变计算图。$\operatorname{LN}_1$ 与 $\operatorname{LN}_2$ 通常有各自的 gamma/beta；参数形状相同不意味着共享参数。
+
+```mermaid
+flowchart TD
+    X["X：block 输入"] --> AT["因果多头注意力"]
+    X --> P1["相加：X + 注意力输出"]
+    AT --> P1
+    P1 --> L1["LayerNorm 1"]
+    L1 --> U["U：注意力子层输出"]
+    U --> FF["逐位置 FFN"]
+    U --> P2["相加：U + FFN 输出"]
+    FF --> P2
+    P2 --> L2["LayerNorm 2"]
+    L2 --> Y["Y：block 输出"]
+```
+
+沿用 3.4–3.5.3 的全部投影与 FFN 参数，两组 LayerNorm 均取 gamma=[1,1]、beta=[0,0]、epsilon=$10^{-5}$，第三个位置计算如下：
+
+| 阶段 | 第三个位置的值 |
+| --- | --- |
+| 输入 $X$ | $[0.6,0.7]$ |
+| 因果多头注意力输出 | $[0.935641,1.165020]$ |
+| 第一次残差相加 | $[1.535641,1.865020]$ |
+| 第一次归一化，得到 $U$ | $[-0.999816,0.999816]$ |
+| FFN 分支输出 | $[0.349908,0.149982]$ |
+| 第二次残差相加 | $[-0.649908,1.149797]$ |
+| 第二次归一化，得到 $Y$ | $[-0.999994,0.999994]$ |
+
+本次从初始 $X$ 重算完整序列前向，使用未舍入中间量。二维、单位缩放、零偏移的 LayerNorm 使多组输入接近 $[-1,1]$，不能由此认定 FFN 无作用，也不能将此现象推广到高维模型。该结果是隐藏表示，不是词表概率。
+
+Pre-LN 的两个子层则是：
+
+$$
+U=X+\operatorname{MHA}_{\mathrm{causal}}\left(\operatorname{LN}_1(X)\right),
+$$
+
+$$
+Y=U+\operatorname{FFN}\left(\operatorname{LN}_2(U)\right).
+$$
+
+这里两次归一化都只放在对应变换分支内，直通分支分别传递 $X$ 和 $U$。两种完整 block 不等价，不能移用 Post-LN 的数值结果作为 Pre-LN 结果；某些 Pre-LN 整体模型还会在最后一个 block 后设置最终归一化。
+
+若输入形状为 $B\times T\times d_{\mathrm{model}}$，每个子层输出和整个 block 输出都保持此形状；FFN 只在内部分支扩张特征维度。多个 block 按 $X^{(\ell+1)}=\operatorname{Block}_{\ell}(X^{(\ell)})$ 堆叠，不同层通常使用不同参数。下一层根据上一层输出重新计算 Q/K/V；注意力头是同层并行分支，block 是跨层串行组合。
+
+在固定参数下，若每层注意力都满足因果掩码，LayerNorm、FFN 与残差均只处理对应位置，则任意深度的位置 $i$ 只依赖原始输入的前 $i$ 个位置。增加深度不会让未来信息绕过掩码。训练时层间仍有依赖，但同一层的所有已知位置可以矩阵化计算。
+
+CPU NumPy float64 核对了三个位置的完整 Post-LN 前向及子模块组合。固定参数，将第三个输入从 [0.6,0.7] 改为 [2,-1] 后，前两行 block 输出在绝对容差 $10^{-14}$ 内不变。此为前向验证，尚非完整语言模型训练实验。
+
 ## 参考资料
 
 - [D2L：Bahdanau 注意力](../refs/d2l-en/chapter_attention-mechanisms-and-transformers/bahdanau-attention.md)：固定状态瓶颈与根据预测需求读取编码器位置。
