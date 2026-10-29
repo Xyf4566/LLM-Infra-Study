@@ -757,7 +757,199 @@ $$
 
 CPU NumPy float64 核对了上述两种顺序、有无加性位置向量的四组第一层单头前向。不加位置向量的两组第三行在绝对容差 $10^{-14}$ 内一致；加位置向量后本例的第三行输出不同。未开展训练实验，未把单层结果外推为多层模型结论。
 
+### 3.6.2 正弦/余弦位置编码
+
+固定正弦/余弦编码按位置 ID 生成向量，仍通过 $x_i^{(0)}=e_{w_i}+p_i$ 加入第一个 block 的输入。与可学习绝对位置表不同，位置向量本身不作为参数更新，词向量和后续网络仍然参与训练。
+
+本节位置与特征维度从 0 编号，第一个 token 对应 $i=0$。设宽度 $d=d_{\mathrm{model}}$ 为偶数，每两个维度组成一组，$j=0,\ldots,d/2-1$：
+
+$$
+\omega_j=10000^{-2j/d},\qquad
+p_{i,2j}=\sin(i\omega_j),\qquad
+p_{i,2j+1}=\cos(i\omega_j).
+$$
+
+$i$ 表示位置，$j$ 表示频率组，$2j,2j+1$ 表示特征维度。同组正弦和余弦使用相同频率，不同组的频率不同；角度使用弧度，10000 是该方案选定的常数。
+
+当 $d=4$ 时，$\omega_0=1,\omega_1=0.01$，因此：
+
+$$
+p_i=[\sin i,\cos i,\sin(i/100),\cos(i/100)].
+$$
+
+```mermaid
+flowchart TD
+    I["位置 i"] --> F["角度 i：每格增加 1 弧度"]
+    I --> S["角度 i/100：每格增加 0.01 弧度"]
+    F --> A["维度 0、1：sin i，cos i"]
+    S --> B["维度 2、3：sin(i/100)，cos(i/100)"]
+    A --> P["四维位置向量 p_i"]
+    B --> P
+    P --> X["与词向量逐元素相加"]
+```
+
+| 位置 $i$ | $\sin i$ | $\cos i$ | $\sin(i/100)$ | $\cos(i/100)$ |
+| --- | ---: | ---: | ---: | ---: |
+| 0 | 0 | 1 | 0 | 1 |
+| 1 | 0.841471 | 0.540302 | 0.010000 | 0.999950 |
+| 2 | 0.909297 | -0.416147 | 0.019999 | 0.999800 |
+
+把位置暂视作连续变量，两组的周期分别为 $2\pi\approx6.28$ 与 $200\pi\approx628.32$；实际 token 仅取整数位置的值。不同频率提供不同尺度的周期特征。变化快慢指相位推进速度，不表示每一步每个分量的数值增量都相同；某个分量重复也不意味着整个位置向量重复。
+
+正弦与余弦成对，使固定位置偏移对应一个不依赖起点的线性变换。对任意一组频率 $\omega$，由三角函数加法公式：
+
+$$
+\begin{bmatrix}
+\sin((i+\Delta)\omega)\\
+\cos((i+\Delta)\omega)
+\end{bmatrix}
+=
+\begin{bmatrix}
+\cos(\Delta\omega)&\sin(\Delta\omega)\\
+-\sin(\Delta\omega)&\cos(\Delta\omega)
+\end{bmatrix}
+\begin{bmatrix}
+\sin(i\omega)\\
+\cos(i\omega)
+\end{bmatrix}.
+$$
+
+此处将一对分量写成列向量；固定 $\Delta,\omega$ 后，变换矩阵不依赖 $i$。例如，同一频率组内，从位置 2 到 5、从位置 10 到 13 使用相同变换。这给绝对位置编码带来可利用的相对位移结构，但不保证注意力自动学会距离关系；词向量与 Q/K 投影仍会影响实际得分。
+
+固定编码无需学习位置参数，公式可以计算更大的位置编号。具体实现若预先缓存编码，仍需准备足够长度。公式可计算不等于模型能够可靠泛化到训练长度之外。加性编码保持输入宽度，且仍不能替代因果掩码。
+
+CPU NumPy float64 核对了上述四维数值，以及位置 $i=0,\ldots,19$、偏移 $\Delta\in\{-3,1,7\}$ 下两组频率的线性位移恒等式，最大绝对误差约 $2.22\times10^{-16}$；同时核对每组 $\sin^2+\cos^2=1$。这些是公式与数值检查，未开展位置编码训练或长序列泛化实验。
+
+### 3.6.3 RoPE：二维旋转与相对位置
+
+RoPE 在 Q、K 投影之后，根据位置编号旋转向量，再计算注意力点积。以下采用 V 不旋转的基本配置。为方便矩阵推导，单个 q、k 使用列向量记号；它们是本层输入投影后、尚未施加本次旋转的结果。
+
+```mermaid
+flowchart TD
+    X["本层输入表示"] --> Q["投影得到 q_i"]
+    X --> K["投影得到 k_j"]
+    X --> V["投影得到 v_j"]
+    Q --> RQ["按位置 i 旋转"]
+    K --> RK["按位置 j 旋转"]
+    RQ --> S["点积、缩放、因果掩码、softmax"]
+    RK --> S
+    S --> A["用注意力权重汇总 value"]
+    V --> A
+```
+
+二维旋转矩阵为：
+
+$$
+R(\phi)=
+\begin{bmatrix}
+\cos\phi&-\sin\phi\\
+\sin\phi&\cos\phi
+\end{bmatrix},\qquad
+R(\phi)\begin{bmatrix}a\\b\end{bmatrix}
+=
+\begin{bmatrix}a\cos\phi-b\sin\phi\\a\sin\phi+b\cos\phi\end{bmatrix}.
+$$
+
+旋转保持向量长度。设每个位置的角度增量为 $\theta$，query 位置为 $i$，key 位置为 $j$：
+
+$$
+\widetilde q_i=R(i\theta)q_i,\qquad
+\widetilde k_j=R(j\theta)k_j.
+$$
+
+由 $R(\alpha)^\top=R(-\alpha)$ 及旋转复合关系可得：
+
+$$
+\begin{aligned}
+\widetilde q_i^\top\widetilde k_j
+&=q_i^\top R(i\theta)^\top R(j\theta)k_j\\
+&=q_i^\top R((j-i)\theta)k_j.
+\end{aligned}
+$$
+
+因此，本次位置旋转给点积带入的位置依赖可写为相对位置差 $j-i$，但点积仍依赖内容向量 $q_i,k_j$。query 看向过去时 $j-i\leq0$，负号来自本节的点积与旋转约定。
+
+以 $\theta=\pi/2$、旋转前 $q_i=k_j=[1,0]^\top$ 演示：
+
+| query 位置 $i$ | key 位置 $j$ | 旋转后 query | 旋转后 key | 点积 |
+| --- | --- | --- | --- | ---: |
+| 0 | 0 | $[1,0]^\top$ | $[1,0]^\top$ | 1 |
+| 1 | 0 | $[0,1]^\top$ | $[1,0]^\top$ | 0 |
+| 2 | 0 | $[-1,0]^\top$ | $[1,0]^\top$ | -1 |
+
+该角度仅用于手算，不是完整多频率配置。将 $(i,j)=(1,0)$ 同时平移到 $(4,3)$，旋转后分别为 $[1,0]^\top$、$[0,-1]^\top$，点积仍为 0。一般而言，固定旋转前 Q、K 并同时平移位置编号，不改变此点积；若移动实际文本改变了上下文表示，则不能直接推出得分不变。
+
+表中是缩放前点积，不是注意力权重。后续仍需除以 $\sqrt{d_k}$、施加因果掩码和逐行 softmax，再汇总 V。RoPE 不替代因果掩码，多维分组是后续内容。
+
+CPU NumPy float64 核对了上述四组数值；另用随机种子 363 生成 100 组二维 Q/K 与位置编号（0–31），固定角度增量 0.37 弧度、同时平移 5 个位置，核对点积的相对位置表达式与平移不变性，最大绝对误差约 $4.44\times10^{-15}$。未进行模型训练或长上下文性能评估。
+
+### 3.6.4 多维 RoPE：分组旋转与多频率
+
+设单个注意力头的 Q、K 宽度 $d_k$ 为偶数，整个头参与旋转。将每个向量按相邻维度分成 $d_k/2$ 个二维组，每组独立旋转，再按原顺序放回。这些分组属于同一个 token、同一个头的不同特征，并非不同 token。
+
+以组号 $r=0,\ldots,d_k/2-1$ 区分不同频率，基础配置取：
+
+$$
+\theta_r=10000^{-2r/d_k}.
+$$
+
+位置 $i$ 的 query 第 $r$ 组旋转 $i\theta_r$；位置 $j$ 的 key 对应组旋转 $j\theta_r$。同组 Q、K 使用相同频率。位置编号决定 token 在哪里，组号决定所用频率。此处的宽度是单头 $d_k$，而加性输入位置向量使用 $d_{\mathrm{model}}$。
+
+当 $d_k=4$ 时，两组频率是 $1,0.01$：
+
+```mermaid
+flowchart TD
+    Q["位置 i 的四维 query"] --> A["第 0 组：维度 0、1"]
+    Q --> B["第 1 组：维度 2、3"]
+    A --> RA["旋转 i 弧度"]
+    B --> RB["旋转 i/100 弧度"]
+    RA --> O["按原顺序放回，仍是四维 query"]
+    RB --> O
+```
+
+加性正弦编码生成一个与输入相加的位置向量；RoPE 使用位置相关角度，旋转投影后的 Q、K 分量。
+
+取旋转前 $q_2=k_0=[1,0,1,0]^\top$。query 的两组角度分别为 2、0.02 弧度，key 的两组角度都为 0：
+
+$$
+\widetilde q_2=
+\begin{bmatrix}\cos2\\\sin2\\\cos0.02\\\sin0.02\end{bmatrix}
+\approx
+\begin{bmatrix}-0.416147\\0.909297\\0.999800\\0.019999\end{bmatrix},
+\qquad
+\widetilde k_0=
+\begin{bmatrix}1\\0\\1\\0\end{bmatrix}.
+$$
+
+各组点积贡献相加：
+
+$$
+\widetilde q_2^\top\widetilde k_0
+=\cos2+\cos0.02
+\approx0.583653,
+\qquad
+s_{2,0}=\frac{0.583653}{\sqrt4}\approx0.291827.
+$$
+
+缩放使用整个头的 $d_k=4$，不是每组的二维宽度。每个 query-key 配对得到一个总得分，再对同一个 query 的可见来源位置执行 softmax；不是在二维组之间或每组内部做 softmax。单个缩放得分尚不是注意力权重。
+
+记第 $r$ 个二维组为 $q_i^{(r)},k_j^{(r)}$，由二维恒等式逐组求和：
+
+$$
+\widetilde q_i^\top\widetilde k_j
+=
+\sum_{r=0}^{d_k/2-1}
+(q_i^{(r)})^\top R((j-i)\theta_r)k_j^{(r)}.
+$$
+
+每组处理相同位置差，但对应不同角度差。固定旋转前的 Q、K，同时平移位置编号时，每组及总点积不变。每组旋转保持长度，因而整个向量的长度与维度保持不变。
+
+CPU NumPy float64 核对上述四维例子；以随机种子 364 生成 100 组四维 Q/K 和 0–31 的位置编号，使用频率 $[1,0.01]$、共同位移 5，核对相对位置表达式、共同平移不变性与 query 范数保持，最大绝对误差约 $1.78\times10^{-15}$。未开展训练或长上下文性能实验。
+
 ## 参考资料
+
+- [RoFormer 原论文 §3.2](https://arxiv.org/html/2104.09864v5#S3.SS2)：RoPE 的二维旋转、相对位置点积与多维推广。
+- [Hugging Face：RoFormer](https://huggingface.co/docs/transformers/model_doc/roformer)：模型配置与 V 旋转选项。
 
 - [D2L：Bahdanau 注意力](../refs/d2l-en/chapter_attention-mechanisms-and-transformers/bahdanau-attention.md)：固定状态瓶颈与根据预测需求读取编码器位置。
 - [D2L：自注意力与位置编码](../refs/d2l-en/chapter_attention-mechanisms-and-transformers/self-attention-and-positional-encoding.md)：同一序列内部的信息汇总。

@@ -1863,6 +1863,71 @@
       "content": "两题都正确。再精确一点：位置向量由位置 ID 决定，与该位置是什么词无关；训练和推理都会使用位置信息。因果掩码则负责阻止读取未来 token。\n\n我会保存今天的正文、答题记录和学习进度，检查后提交并推送。下次从 3.6.2 正弦/余弦位置编码开始。",
       "channel": "commentary",
       "sequence": 193
+    },
+    {
+      "id": 194,
+      "role": "user",
+      "content": "从 [梳理 LLM Infra 学习进度](codex://threads/01a15e8f-d629-7f41-9201-366e581b50ac) 会话继续学习",
+      "sequence": 194
+    },
+    {
+      "id": 195,
+      "role": "assistant",
+      "content": "接着上一节，今天学习 **3.6.2 正弦/余弦位置编码**。\n\n我们已经知道，进入第一个 block 前可以计算：\n\n\\[\n\\mathbf x_i^{(0)}=\\mathbf e_{w_i}+\\mathbf p_i\n\\]\n\n今天只改变位置向量 \\(\\mathbf p_i\\) 的来源：**用固定公式生成它，而不是把每个位置的向量都作为参数学习。**\n\n**先把公式拆开。**\n\n设模型宽度为偶数 \\(d\\)。这次位置和特征维度都从 **0** 编号，所以第一个 token 的位置是 \\(i=0\\)；这与上一节从 1 编号只是约定不同。\n\n每两个维度为一组，组号为 \\(j=0,\\ldots,d/2-1\\)，定义：\n\n\\[\n\\omega_j=\\frac{1}{10000^{2j/d}}\n\\]\n\n这一组的两个分量是：\n\n\\[\n\\boxed{\np_{i,2j}=\\sin(i\\omega_j),\\qquad\np_{i,2j+1}=\\cos(i\\omega_j)\n}\n\\]\n\n注意三个索引的分工：\n\n- \\(i\\)：序列中的位置。\n- \\(j\\)：第几组正弦/余弦。\n- \\(2j,2j+1\\)：这一组占据的两个特征维度。\n\n同组的正弦和余弦使用**相同频率**；不同组的频率不同。角度用弧度，\\(10000\\) 是这个方案选定的常数。\n\n**用四维例子看清它在做什么。**\n\n令 \\(d=4\\)，只有两组：\n\n\\[\n\\omega_0=1,\\qquad\n\\omega_1=\\frac{1}{10000^{2/4}}=\\frac1{100}\n\\]\n\n因此，位置向量就是：\n\n\\[\n\\boxed{\n\\mathbf p_i=\n[\\sin i,\\ \\cos i,\\ \\sin(i/100),\\ \\cos(i/100)]\n}\n\\]\n\n```mermaid\nflowchart TD\n    I[\"同一个位置 i\"] --> F[\"角度 i：每前进一格增加 1 弧度\"]\n    I --> S[\"角度 i/100：每前进一格增加 0.01 弧度\"]\n    F --> A[\"维度 0、1：sin i，cos i\"]\n    S --> B[\"维度 2、3：sin(i/100)，cos(i/100)\"]\n    A --> P[\"按维度排列，得到四维位置向量 p_i\"]\n    B --> P\n    P --> X[\"与四维词向量逐元素相加\"]\n```\n\n前三个位置的数值为：\n\n| 位置 \\(i\\) | \\(\\sin i\\) | \\(\\cos i\\) | \\(\\sin(i/100)\\) | \\(\\cos(i/100)\\) |\n|---|---:|---:|---:|---:|\n| 0 | 0 | 1 | 0 | 1 |\n| 1 | 0.841471 | 0.540302 | 0.010000 | 0.999950 |\n| 2 | 0.909297 | −0.416147 | 0.019999 | 0.999800 |\n\n可以看到，前两个分量变化快，后两个变化慢。这里“快慢”指**相位推进速度**，不代表每一步每个分量的数值变化都同样大。\n\n把位置暂时当作连续变量，两组的周期分别约为：\n\n\\[\n2\\pi\\approx6.28,\\qquad 200\\pi\\approx628.32\n\\]\n\n实际 token 只取整数位置上的值。多个频率让一个位置同时具有不同尺度的周期特征；**某一个分量重复，并不等于整个位置向量重复。**\n\n**为什么正弦和余弦要成对？**\n\n因为位置向前移动固定距离时，这两个分量可以通过一个固定的线性变换一起更新。\n\n只看一组频率 \\(\\omega\\)。由三角函数加法公式：\n\n\\[\n\\sin((i+\\Delta)\\omega)\n=\n\\sin(i\\omega)\\cos(\\Delta\\omega)\n+\n\\cos(i\\omega)\\sin(\\Delta\\omega)\n\\]\n\n要从位置 \\(i\\) 得到位置 \\(i+\\Delta\\) 的正弦值，右边同时需要原来的正弦值和余弦值。这就是成对保存的一个理由。\n\n把余弦的加法公式也合在一起：\n\n\\[\n\\begin{bmatrix}\n\\sin((i+\\Delta)\\omega)\\\\\n\\cos((i+\\Delta)\\omega)\n\\end{bmatrix}\n=\n\\underbrace{\n\\begin{bmatrix}\n\\cos(\\Delta\\omega)&\\sin(\\Delta\\omega)\\\\\n-\\sin(\\Delta\\omega)&\\cos(\\Delta\\omega)\n\\end{bmatrix}\n}_{M_{\\Delta,\\omega}}\n\\begin{bmatrix}\n\\sin(i\\omega)\\\\\n\\cos(i\\omega)\n\\end{bmatrix}\n\\]\n\n这里为方便写矩阵，临时把一对分量竖着写。\n\n关键是：**固定频率和位移后，矩阵 \\(M_{\\Delta,\\omega}\\) 不依赖起点 \\(i\\)。**\n\n例如，同一组频率中，“从位置 2 移到 5”和“从位置 10 移到 13”都使用同一个变换，因为位移都是 3。这样，绝对位置编码之间就带有可供模型利用的相对位移结构。\n\n但这不代表注意力已经自动学会了距离关系。加入词向量并经过 Q/K 投影后，注意力得分还受到内容和参数影响。\n\n**它与可学习位置表有什么区别？**\n\n| | 可学习绝对位置嵌入 | 固定正弦/余弦编码 |\n|---|---|---|\n| 位置向量来源 | 查参数表 | 按公式计算 |\n| 位置向量自身是否由梯度更新 | 是 | 否 |\n| 遇到更大位置编号 | 原表可能没有对应行 | 公式仍可计算 |\n\n固定的是位置编码，词向量和后续网络仍然可以训练。相加后宽度仍是 \\(d\\)，因果掩码也仍然需要保留。\n\n还要区分：**能算出更长位置的编码，不等于模型能在更长序列上保持效果。** 模型仍可能没有学会处理训练范围之外的依赖；具体实现若预先缓存位置编码，也需要准备足够的长度。\n\n上面的数值和位移变换已用 NumPy 核对。这一节依据仓库中的 [D2L：自注意力与位置编码](C:/Users/Xyf/Desktop/Documents/LLM-Infra-Study/refs/d2l-en/chapter_attention-mechanisms-and-transformers/self-attention-and-positional-encoding.md)，正文与学习记录也已保存。\n\n**两道理解检查题：**\n\n1. 在这个四维方案中，第一个 token 位于 \\(i=0\\)，词向量为 \\([1,0,-1,0.5]\\)。送入第一个 block 的 \\(\\mathbf x_0^{(0)}\\) 是什么？相加后有几维？\n2. 一个模型只用长度不超过 512 的序列训练。现在用公式生成位置 4096 的编码，能否据此断言模型可以可靠处理这么长的序列？为什么？\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:75-76|note=[resume from verified section 3.6.1 and next lesson]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 195
+    },
+    {
+      "id": 196,
+      "role": "user",
+      "content": "1. 应该是\\\\([1,1,-1,1.5]\\\\)，相加后是4维；2. 不能，位置编码只含有初步的位置信息，实际上的所有位置关系信息的学习还需要对应文本序列进一步训练。我们继续",
+      "sequence": 196
+    },
+    {
+      "id": 197,
+      "role": "assistant",
+      "content": "两题都正确：\n\n\\[\n[1,0,-1,0.5]+[0,1,0,1]=[1,1,-1,1.5]\n\\]\n\n第二题再精确一点：固定编码已经提供了确定的位置结构，模型需要学习怎样利用它。**模型可能泛化到未见过的长度，不一定每种长度都要重新训练；但“编码能算出来”本身不能保证这种泛化。**\n\n接下来学习 **3.6.3 RoPE：先看二维旋转怎样引入相对位置**。\n\n上一节把位置向量加到输入上。RoPE（旋转位置编码）的做法是：**先得到 Q、K，再按各自的位置旋转它们，最后计算点积。** 下面采用 V 不旋转的基本配置；Hugging Face 的 RoFormer 配置也默认关闭 V 的旋转。[RoFormer 官方文档](https://huggingface.co/docs/transformers/model_doc/roformer)\n\n```mermaid\nflowchart TD\n    X[\"本层输入表示\"] --> Q[\"投影得到 q_i\"]\n    X --> K[\"投影得到 k_j\"]\n    X --> V[\"投影得到 v_j\"]\n    Q --> RQ[\"按位置 i 旋转\"]\n    K --> RK[\"按位置 j 旋转\"]\n    RQ --> S[\"点积、缩放、因果掩码、softmax\"]\n    RK --> S\n    S --> A[\"用注意力权重汇总 value\"]\n    V --> A\n```\n\n**先看一个向量怎么旋转。**\n\n为方便使用旋转矩阵，本节把单个 q、k 写成列向量。标准二维旋转矩阵是：\n\n\\[\nR(\\phi)=\n\\begin{bmatrix}\n\\cos\\phi&-\\sin\\phi\\\\\n\\sin\\phi&\\cos\\phi\n\\end{bmatrix}\n\\]\n\n因此：\n\n\\[\nR(\\phi)\n\\begin{bmatrix}a\\\\b\\end{bmatrix}\n=\n\\begin{bmatrix}\na\\cos\\phi-b\\sin\\phi\\\\\na\\sin\\phi+b\\cos\\phi\n\\end{bmatrix}\n\\]\n\n它改变方向，保持长度。例如逆时针转 \\(90^\\circ\\)：\n\n\\[\nR(\\pi/2)\\begin{bmatrix}1\\\\0\\end{bmatrix}\n=\n\\begin{bmatrix}0\\\\1\\end{bmatrix}\n\\]\n\n设每前进一个位置，旋转角度增加 \\(\\theta\\)。那么：\n\n\\[\n\\widetilde{\\mathbf q}_i=R(i\\theta)\\mathbf q_i,\\qquad\n\\widetilde{\\mathbf k}_j=R(j\\theta)\\mathbf k_j\n\\]\n\n波浪号表示旋转后的向量。这里的 \\(\\mathbf q_i,\\mathbf k_j\\) 已由本层输入投影得到，还没有施加本次位置旋转。\n\n**为什么分别使用绝对位置，点积却能体现相对位置？**\n\n展开旋转后的点积：\n\n\\[\n\\begin{aligned}\n\\widetilde{\\mathbf q}_i^\\top\\widetilde{\\mathbf k}_j\n&=(R(i\\theta)\\mathbf q_i)^\\top\n  (R(j\\theta)\\mathbf k_j)\\\\\n&=\\mathbf q_i^\\top R(i\\theta)^\\top R(j\\theta)\\mathbf k_j\\\\\n&=\\boxed{\\mathbf q_i^\\top R((j-i)\\theta)\\mathbf k_j}.\n\\end{aligned}\n\\]\n\n最后一步用了：\n\n\\[\nR(\\alpha)^\\top=R(-\\alpha),\\qquad\nR(-\\alpha)R(\\beta)=R(\\beta-\\alpha)\n\\]\n\n也就是：先转回 \\(\\alpha\\)，再转过 \\(\\beta\\)，净效果只剩角度差。这个关系正是 RoPE 二维构造的核心。[RoFormer 原论文 §3.2](https://arxiv.org/html/2104.09864v5#S3.SS2)\n\n这里 \\(i\\) 是 query 位置，\\(j\\) 是 key 位置，所以公式得到的是 **\\(j-i\\)**。当 query 看向过去时，\\(j-i\\leq0\\)。\n\n注意，点积同时取决于：\n\n- 旋转前的内容向量 \\(\\mathbf q_i,\\mathbf k_j\\)；\n- 相对位置差 \\(j-i\\)。\n\n**不是“得分只由距离决定”，而是这次旋转带入的位置依赖可以写成位置差。**\n\n**算一个容易看清的例子。**\n\n为了方便手算，暂取每个位置旋转 \\(90^\\circ\\)，即 \\(\\theta=\\pi/2\\)。这是演示角度，后面完整配置会使用多组频率。\n\n固定旋转前的两个向量：\n\n\\[\n\\mathbf q_i=\\mathbf k_j=\n\\begin{bmatrix}1\\\\0\\end{bmatrix}\n\\]\n\n| query 位置 \\(i\\) | key 位置 \\(j\\) | 旋转后的 query | 旋转后的 key | 点积 |\n|---|---|---|---|---:|\n| 0 | 0 | \\([1,0]^\\top\\) | \\([1,0]^\\top\\) | 1 |\n| 1 | 0 | \\([0,1]^\\top\\) | \\([1,0]^\\top\\) | 0 |\n| 2 | 0 | \\([-1,0]^\\top\\) | \\([1,0]^\\top\\) | −1 |\n\n内容向量相同，位置差不同，点积就可能不同。\n\n再把第二行的两个位置同时加 3：\n\n\\[\n(i,j)=(1,0)\\longrightarrow(4,3)\n\\]\n\n两个向量分别变为 \\([1,0]^\\top\\) 和 \\([0,-1]^\\top\\)，点积仍为 0，因为位置差仍是 \\(-1\\)。\n\n这与“把两根箭头一起旋转，夹角不变”是同一件事。这里保持了旋转前的 Q、K 不变；如果实际移动文本改变了上下文表示，就不能直接套用这个结论。\n\n表里列的是**点积，还不是注意力权重**。后面仍要除以 \\(\\sqrt{d_k}\\)、屏蔽未来位置，再对可见来源做 softmax。旋转本身不会禁止读取未来。\n\n上述例子，以及固定 Q、K 时同时平移位置的恒等关系，都已用 NumPy 核对。本节先停在二维机制，多维分组留到确认之后。\n\n**两道理解检查题：**\n\n1. 仍取 \\(\\theta=\\pi/2\\)。旋转前 \\(\\mathbf q_1=[1,0]^\\top\\)，\\(\\mathbf k_0=[0,1]^\\top\\)。旋转后的两个向量分别是什么？它们的点积是多少？\n2. 两组 query-key 配对的位置分别是 \\((i,j)=(5,2)\\) 和 \\((8,5)\\)，位置差相同。如果它们旋转前的内容向量不同，能否保证旋转后的点积相同？请结合公式说明。",
+      "channel": "final",
+      "sequence": 197
+    },
+    {
+      "id": 198,
+      "role": "user",
+      "content": "1. 旋转后分别是\\\\(\\mathbf q_1=[0,1]^\\top\\\\)和\\\\(\\mathbf q_1=[-1,0]^\\top\\\\)，点积为0；2. 不能保证，因为虽然两对点积有相同的旋转矩阵，但是旋转前内容向量不同，所以大多数情况下点积不相同，我们继续",
+      "sequence": 198
+    },
+    {
+      "id": 199,
+      "role": "assistant",
+      "content": "第二题判断正确：位置差相同，使两对计算中的旋转矩阵相同，但内容向量仍会影响点积。更严谨地说，**结果可能不同，也可能恰好相同**，无需断言“大多数情况下不同”。\n\n第一题中，query 算对了，**key 的旋转角度用错了**。\n\n\\(\\theta=\\pi/2\\) 表示“每前进一个位置，角度增加 \\(90^\\circ\\)”。实际旋转多少，要乘上各自的位置编号：\n\n\\[\n\\widetilde{\\mathbf q}_i=R(i\\theta)\\mathbf q_i,\\qquad\n\\widetilde{\\mathbf k}_j=R(j\\theta)\\mathbf k_j\n\\]\n\n因此，这道题应当是：\n\n| 向量 | 所在位置 | 实际旋转角度 | 旋转后 |\n|---|---:|---:|---|\n| \\(\\mathbf q_1=[1,0]^\\top\\) | 1 | \\(1\\times90^\\circ=90^\\circ\\) | \\([0,1]^\\top\\) |\n| \\(\\mathbf k_0=[0,1]^\\top\\) | 0 | \\(0\\times90^\\circ=0^\\circ\\) | \\([0,1]^\\top\\) |\n\n所以：\n\n\\[\n\\boxed{\n\\widetilde{\\mathbf q}_1^\\top\\widetilde{\\mathbf k}_0\n=[0,1]\\begin{bmatrix}0\\\\1\\end{bmatrix}=1\n}\n\\]\n\n你算出的 \\([-1,0]^\\top\\)，是把原来的 key \\([0,1]^\\top\\) 也转了 \\(90^\\circ\\)；但它的位置编号是 0，本题中不旋转。**向量的数值决定原来的方向，位置编号决定额外旋转多少。**\n\n继续多维形式前，我们用一道小题确认这个区别：\n\n仍取 \\(\\theta=\\pi/2\\)，保持旋转前的内容向量为\n\\[\n\\mathbf q=[1,0]^\\top,\\qquad \\mathbf k=[0,1]^\\top,\n\\]\n现在把 query 放在位置 \\(i=2\\)，key 放在位置 \\(j=1\\)。它们分别旋转多少度？旋转后的向量和点积各是什么？",
+      "channel": "final",
+      "sequence": 199
+    },
+    {
+      "id": 200,
+      "role": "user",
+      "content": "分别旋转180和90度，旋转后分别是\\(\\mathbf q_1=[-1,0]^\\top\\)和\\(\\mathbf q_1=[-1,0]^\\top\\)，点积是1",
+      "sequence": 200
+    },
+    {
+      "id": 201,
+      "role": "assistant",
+      "content": "正确：query 旋转 \\(180^\\circ\\)，key 旋转 \\(90^\\circ\\)，结果都是 \\([-1,0]^\\top\\)，点积为 1。\n\n符号上，两个结果分别记作 \\(\\widetilde{\\mathbf q}_2\\) 和 \\(\\widetilde{\\mathbf k}_1\\)，这样能保留它们各自的身份与位置。\n\n现在进入 **3.6.4 多维 RoPE：每两个维度一组，使用不同频率**。\n\n**先明确：在一个注意力头内部旋转。**\n\n设一个头的 Q、K 宽度为偶数 \\(d_k\\)。把每个向量分成 \\(d_k/2\\) 个二维组，各组独立旋转，再按原维度顺序放回。\n\n例如 \\(d_k=4\\)：\n\n\\[\n\\mathbf q_i=\n\\begin{bmatrix}\nq_{i,0}\\\\q_{i,1}\\\\q_{i,2}\\\\q_{i,3}\n\\end{bmatrix}\n\\quad\\longrightarrow\\quad\n\\begin{cases}\n\\text{第 0 组：}[q_{i,0},q_{i,1}]^\\top\\\\\n\\text{第 1 组：}[q_{i,2},q_{i,3}]^\\top\n\\end{cases}\n\\]\n\n**这些是同一个 token、同一个头的不同特征，不是不同 token。**\n\n**每组的角度怎样决定？**\n\n用 \\(r\\) 表示组号，避免与 key 的位置 \\(j\\) 混淆。基础 RoPE 的一组频率选择是：\n\n\\[\n\\theta_r=10000^{-2r/d_k},\n\\qquad r=0,\\ldots,d_k/2-1\n\\]\n\n位置 \\(i\\) 的 query、第 \\(r\\) 组，旋转 \\(i\\theta_r\\)；位置 \\(j\\) 的 key、同一组，旋转 \\(j\\theta_r\\)。对应的 Q、K 组使用同一频率。[RoFormer 原论文 §3.2.2](https://arxiv.org/html/2104.09864v5#S3.SS2.SSS2)\n\n这里有两个独立因素：\n\n- **位置编号 \\(i\\)** 决定这个 token 在哪里。\n- **组号 \\(r\\)** 决定这两个特征使用哪一个频率。\n\n对于四维头：\n\n\\[\n\\theta_0=1,\\qquad\\theta_1=0.01\n\\]\n\n因此，同一个位置 \\(i\\) 内，两组分别旋转 \\(i\\) 弧度和 \\(i/100\\) 弧度：\n\n```mermaid\nflowchart TD\n    Q[\"位置 i 的四维 query\"] --> A[\"第 0 组：维度 0、1\"]\n    Q --> B[\"第 1 组：维度 2、3\"]\n    A --> RA[\"旋转 i 弧度\"]\n    B --> RB[\"旋转 i/100 弧度\"]\n    RA --> O[\"按原顺序放回，仍是四维 query\"]\n    RB --> O\n```\n\n这沿用了之前“多个频率”的思路，但作用对象不同：加性正弦编码生成位置向量，与输入相加；RoPE 用角度旋转投影后的 Q、K 分量。\n\n还要注意宽度：之前加性位置向量的宽度是 \\(d_{\\mathrm{model}}\\)，这里讨论的是**单个头的 \\(d_k\\)**。本节采用整个头都参与旋转的配置。\n\n**算一次完整的四维点积。**\n\n取旋转前：\n\n\\[\n\\mathbf q_2=\\mathbf k_0=\n\\begin{bmatrix}1\\\\0\\\\1\\\\0\\end{bmatrix}\n\\]\n\nquery 位于位置 2，因此：\n\n- 第 0 组旋转 \\(2\\times1=2\\) 弧度。\n- 第 1 组旋转 \\(2\\times0.01=0.02\\) 弧度。\n\n得到：\n\n\\[\n\\widetilde{\\mathbf q}_2\n=\n\\begin{bmatrix}\n\\cos2\\\\\n\\sin2\\\\\n\\cos0.02\\\\\n\\sin0.02\n\\end{bmatrix}\n\\approx\n\\begin{bmatrix}\n-0.416147\\\\\n0.909297\\\\\n0.999800\\\\\n0.019999\n\\end{bmatrix}\n\\]\n\nkey 位于位置 0，**所有组的旋转角度都是 0**：\n\n\\[\n\\widetilde{\\mathbf k}_0=\n\\begin{bmatrix}1\\\\0\\\\1\\\\0\\end{bmatrix}\n\\]\n\n完整点积就是各组贡献相加：\n\n\\[\n\\begin{aligned}\n\\widetilde{\\mathbf q}_2^\\top\\widetilde{\\mathbf k}_0\n&=\\underbrace{\\cos2}_{\\text{第 0 组}}\n+\\underbrace{\\cos0.02}_{\\text{第 1 组}}\\\\\n&\\approx -0.416147+0.999800\\\\\n&=\\boxed{0.583653}.\n\\end{aligned}\n\\]\n\n这里没有“每组各做一次 softmax”。**先把各组贡献加成一个 query-key 得分，再参与该 query 对所有来源位置的 softmax。**\n\n因为整个头的 \\(d_k=4\\)，缩放时使用：\n\n\\[\ns_{2,0}\n=\\frac{0.583653}{\\sqrt4}\n\\approx0.291827\n\\]\n\n不是分别按二维组除以 \\(\\sqrt2\\)。这个数仍是 softmax 前的得分，不能单独当作注意力权重。\n\n**二维的相对位置性质仍然保留。**\n\n记 \\(\\mathbf q_i^{(r)},\\mathbf k_j^{(r)}\\) 为第 \\(r\\) 个二维组，则：\n\n\\[\n\\boxed{\n\\widetilde{\\mathbf q}_i^\\top\\widetilde{\\mathbf k}_j\n=\n\\sum_{r=0}^{d_k/2-1}\n(\\mathbf q_i^{(r)})^\\top\nR((j-i)\\theta_r)\n\\mathbf k_j^{(r)}\n}\n\\]\n\n每组看到相同的位置差 \\(j-i\\)，但把它转换成不同的角度差。把所有组相加，就得到多频率下的内容与位置匹配。\n\n在固定旋转前 Q、K 的条件下，同时平移位置编号，每组的位置差都不变，所以总点积也不变。分组旋转保持每个二维组的长度，因此也保持整个向量的长度和维度。\n\n上面的数值、相对位置恒等式及长度保持都已用 NumPy 核对。\n\n**两道理解检查题：**\n\n1. 一个多头注意力层采用 \\(d_{\\mathrm{model}}=256\\)、8 个头，每头 Q、K 宽度为 \\(256/8\\)，全部维度参与 RoPE。每个头有多少个二维旋转组？旋转后每个头的 query 是多少维？\n2. 在本节四维配置中，位置 \\(i=3\\) 的 query，两组实际旋转角度分别是多少弧度？如果它读取位置 \\(j=1\\) 的 key，公式 \\(R((j-i)\\theta_r)\\) 中两组的相对角度又分别是多少？",
+      "channel": "final",
+      "sequence": 201
+    },
+    {
+      "id": 202,
+      "role": "user",
+      "content": "1. 每个头有16个二维旋转组，旋转后每个头的query是32维；2. 实际旋转角分别是3和0.03弧度，两者相对角度分别是-2，-0.02弧度。今天就学习到这里，你提交最新的commit",
+      "sequence": 202
+    },
+    {
+      "id": 203,
+      "role": "assistant",
+      "content": "两题都正确。今天停在 3.6.4；我会保存答题结果和进度，检查本次学习资料与会话记录后创建本地 commit。",
+      "channel": "commentary",
+      "sequence": 203
     }
   ],
   "sources": [
