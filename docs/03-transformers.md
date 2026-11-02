@@ -946,7 +946,221 @@ $$
 
 CPU NumPy float64 核对上述四维例子；以随机种子 364 生成 100 组四维 Q/K 和 0–31 的位置编号，使用频率 $[1,0.01]$、共同位移 5，核对相对位置表达式、共同平移不变性与 query 范数保持，最大绝对误差约 $1.78\times10^{-15}$。未开展训练或长上下文性能实验。
 
+## 3.7 Decoder-only 语言模型
+
+### 3.7.1 从因果 block 到下一 token 分布
+
+decoder-only 语言模型用因果 Transformer blocks 处理文本前缀，并输出下一 token 的条件分布。基础结构不额外接一套 encoder，也不包含读取 encoder 输出的交叉注意力。
+
+以下选用 Pre-LN blocks、RoPE 和最后一层之后的最终 LayerNorm。输入 token IDs 的形状为 $B\times T$，查 embedding 后为 $B\times T\times d_{\mathrm{model}}$。RoPE 在各层注意力的 Q、K 投影后使用位置 ID，不要求再在输入处相加一张绝对位置表。各层通常有各自的参数，同一层参数跨位置共享。
+
+```mermaid
+flowchart TD
+    I["token IDs：B × T"] --> E["查 token embedding：B × T × d_model"]
+    E --> C["L 个因果 Pre-LN blocks"]
+    P["位置 ID：在各层注意力中旋转 Q、K"] --> C
+    C --> N["最终 LayerNorm：B × T × d_model"]
+    N --> H["词表投影 LM head"]
+    H --> Z["logits：B × T × N_vocab"]
+    Z --> S["沿词表维度 softmax"]
+    S --> O["每个位置的下一 token 概率分布"]
+```
+
+设最终 LayerNorm 后的表示为 $H\in\mathbb R^{B\times T\times d_{\mathrm{model}}}$。对单个样本的位置 $t$，使用行向量 $\mathbf h_t\in\mathbb R^{1\times d_{\mathrm{model}}}$，共享输出头计算：
+
+$$
+\mathbf z_t=\mathbf h_tW_{\mathrm{vocab}}+\mathbf b_{\mathrm{vocab}},
+\qquad
+W_{\mathrm{vocab}}\in\mathbb R^{d_{\mathrm{model}}\times N_{\mathrm{vocab}}}.
+$$
+
+偏置跨位置共享，也可按架构选择省略。批量输出 $Z$ 的形状为 $B\times T\times N_{\mathrm{vocab}}$。隐藏特征坐标不直接对应候选 token；logits 的词表坐标才与候选 token 一一对应。LM head 是模型末尾的词表投影，与多头注意力的头不同；注意力输出投影 $W_O$ 返回模型宽度，词表投影则输出词表宽度。
+
+沿最后的词表维度执行 softmax：
+
+$$
+p(w_{t+1}=v\mid w_0,\ldots,w_t)
+=
+\frac{\exp(z_{t,v})}
+{\sum_{u=0}^{N_{\mathrm{vocab}}-1}\exp(z_{t,u})}.
+$$
+
+每个样本、每个位置的词表概率之和为 1。注意力内部的 softmax 沿来源位置归一化，描述如何读取上下文；模型输出处沿词表归一化，描述下一 token 的条件概率。
+
+输入为“我、喜欢、数学”且位置从 0 编号时：
+
+| 输出位置 | 可利用的输入前缀 | 预测对象 |
+| --- | --- | --- |
+| 0：“我” | 我 | 位置 1 的 token |
+| 1：“喜欢” | 我、喜欢 | 位置 2 的 token |
+| 2：“数学” | 我、喜欢、数学 | 位置 3 的 token |
+
+若训练文本为“我、喜欢、数学、。”，上述三行对应的目标依次为“喜欢、数学、。”。位置 $t$ 可以读取自身输入，但预测 $t+1$ 时不能读取未来输入。固定参数、保持计算因果时，修改位置 2 的输入不会影响位置 1 的分布。输入长度与输出词表大小是不同的轴；输入只有三个 token 不表示分布只覆盖三个词。
+
+单独演示输出头：候选词顺序取“我、喜欢、数学、。”，设最终归一化后的 $\mathbf h_1=[0.5,1]$，给定：
+
+$$
+W_{\mathrm{vocab}}=
+\begin{bmatrix}
+1&0&1&-1\\
+0&1&1&1
+\end{bmatrix},
+\qquad
+\mathbf b_{\mathrm{vocab}}=\mathbf0.
+$$
+
+则：
+
+$$
+\mathbf z_1=[0.5,1,1.5,0.5],\qquad
+\mathbf p_1\approx[0.157060,0.258948,0.426933,0.157060].
+$$
+
+其中“数学”的概率约为 0.426933，是给定“我、喜欢”前缀的下一 token 概率。概率最大的候选与完整分布应区分；从分布选择 token 属于生成过程。此例给定隐藏表示，只计算输出头，不是前文完整 block 数值的续算。
+
+CPU NumPy float64 核对了该输出头例子。另以固定表示
+$H=[[[1,0],[0.5,1],[-0.2,0.7]],[[0.3,0.2],[0.8,-0.1],[0.1,0.9]]]$
+（$B=2,T=3,d_{\mathrm{model}}=2$）及同一输出权重，核对批量和逐行投影一致、输出形状为 $2\times3\times4$、各行词表概率和为 1。未开展完整模型训练。
+
+### 3.7.2 训练目标与标签对齐
+
+位置 $t$ 的输出分布预测原文位置 $t+1$ 的 token。对原始序列 $w_0,\ldots,w_T$，构造长度均为 $T$ 的输入与标签：
+
+$$
+X=[w_0,\ldots,w_{T-1}],\qquad
+Y=[w_1,\ldots,w_T],\qquad y_t=w_{t+1}.
+$$
+
+对应切片为：
+
+```python
+inputs = tokens[:-1]
+targets = tokens[1:]
+```
+
+例如原始文本分为“我、喜欢、数学、。”四个 token，则：
+
+| 模型位置 $t$ | 当前输入 | 可见前缀 | 标签 $y_t$ |
+| --- | --- | --- | --- |
+| 0 | 我 | 我 | 喜欢 |
+| 1 | 喜欢 | 我、喜欢 | 数学 |
+| 2 | 数学 | 我、喜欢、数学 | 。 |
+
+标签数组与模型输出的位置轴对齐；同一列的标签是原始序列中当前输入 token 的下一个 token。“喜欢”同时是位置 0 的标签和位置 1 的输入，但位置 0 不能读取未来输入位置 1。标签用于损失计算，不作为对应位置前向的额外输入。
+
+```mermaid
+flowchart TD
+    T["原始文本：我、喜欢、数学、。"] --> X["输入 X：我、喜欢、数学"]
+    T --> Y["标签 Y：喜欢、数学、。"]
+    X --> M["因果 Transformer"]
+    M --> Z["三个位置的词表 logits"]
+    Z --> C["逐位置交叉熵"]
+    Y --> C
+    C --> L["对三个目标位置取平均"]
+```
+
+训练时各位置输入来自真实文本，使用真实前缀（teacher forcing）。即使位置 0 预测错误，位置 1 的输入仍为真实的“喜欢”，不会替换为前一位置的预测。同层各位置输出不依赖前一位置的预测结果，因此可在一次前向中计算，由因果掩码限制来源位置。
+
+令 $p_{b,t,v}$ 表示样本 $b$、位置 $t$ 对候选 token $v$ 的概率，真实标签为 $y_{b,t}$。单位置交叉熵取自然对数：
+
+$$
+\ell_{b,t}=-\ln p_{b,t,y_{b,t}}.
+$$
+
+损失关注真实目标的概率，不只是最大概率候选是否正确。若 $B$ 条样本均有 $T$ 个有效目标，不含 padding 或其他需忽略的目标，则：
+
+$$
+\mathcal L=-\frac1{BT}
+\sum_{b=0}^{B-1}\sum_{t=0}^{T-1}
+\ln p_{b,t,y_{b,t}}.
+$$
+
+分母是参与监督的目标位置数，不是词表大小。汇总损失后统一反向传播与参数更新，不在不同位置之间提前更新参数。
+
+单独演示损失：三个位置对真实标签“喜欢、数学、。”的概率分别设为 $0.5,0.25,0.8$，对应损失为 $0.693147,1.386294,0.223144$，平均损失约为 $0.767528$。此例给定三个目标概率，独立于 3.7.1 的输出头示例。
+
+给定首个 token“我”，续文“喜欢、数学、。”的条件概率为 $0.5\times0.25\times0.8=0.1$，故平均损失也等于 $-\ln(0.1)/3$。本例未包含预测首个“我”的损失，不能把该乘积称为包含首词概率的完整句子概率。
+
+CPU NumPy float64 核对概率归一化、标签索引、交叉熵与 log-sum-exp 形式的一致性，以及负对数条件概率乘积与损失和的一致性。验证使用词表顺序“我、喜欢、数学、。”、标签 ID $[1,2,3]$，完整概率矩阵为：
+
+$$
+P=\begin{bmatrix}
+0.1&0.5&0.3&0.1\\
+0.2&0.1&0.25&0.45\\
+0.05&0.1&0.05&0.8
+\end{bmatrix}.
+$$
+
+以 $Z=\ln P$ 构造对应 logits，核对 $-\ln P_{t,y_t}=\operatorname{logsumexp}(Z_{t,:})-Z_{t,y_t}$，绝对容差 $10^{-14}$。未运行完整 Transformer 的训练或参数更新实验。
+
+### 3.7.3 自回归生成：选择、追加与停止
+
+自由生成以用户给定的 token 前缀为条件。前缀长度为 $T$ 时，使用最后一个输入位置 $T-1$ 的输出分布选择新 token：
+
+$$
+\hat w_T=\operatorname*{argmax}_{v}p(v\mid w_0,\ldots,w_{T-1}).
+$$
+
+上述规则为贪心解码。其他输出行预测的是前缀内部的下一位置，不能直接当作多个待生成的未来 token。新 token 追加到输入末尾，成为下一轮条件的一部分。生成过程中通常不计算训练损失、不反向更新权重，参数保持不变。
+
+以“我、喜欢”为前缀，假设各步最高概率候选如下：
+
+| 步骤 | 当前前缀 | 使用的输出位置 | 选择的 token | 概率 |
+| --- | --- | --- | --- | ---: |
+| 1 | 我、喜欢 | 1 | 数学 | 0.60 |
+| 2 | 我、喜欢、数学 | 2 | 。 | 0.85 |
+| 3 | 我、喜欢、数学、。 | 3 | &lt;eos&gt; | 0.90 |
+
+位置从 0 编号。选择“数学”后，下次计算的是 $p(w_3\mid\text{我，喜欢，数学})$；若选择“物理”，下次则使用“我、喜欢、物理”为条件。&lt;eos&gt; 是结束 token；普通句号不一定触发停止，也可设定最大新增 token 数。
+
+```mermaid
+flowchart TD
+    P["当前前缀"] --> M["因果 Transformer 前向"]
+    M --> Z["取最后一个输入位置的 logits"]
+    Z --> S["选择下一个 token"]
+    S --> A["追加到前缀末尾"]
+    A --> C{"选到结束 token<br/>或达到生成长度上限？"}
+    C -- 否 --> P
+    C -- 是 --> E["结束生成"]
+```
+
+先采用无缓存、每轮重算完整前缀的计算方式。batch size 为 1、词表大小为 6 时，前缀长度 2、3、4 分别产生 $1\times2\times6$、$1\times3\times6$、$1\times4\times6$ 的 logits，每轮取 $Z[0,-1,:]$。约定 $\operatorname{model}(\text{tokens})$ 返回此单样本的三维 logits，伪代码为：
+
+```python
+tokens = list(prompt_ids)
+
+for _ in range(max_new_tokens):
+    logits = model(tokens)             # [1, 当前长度, 词表大小]
+    next_id = argmax(logits[0, -1, :])  # 最后位置，沿词表选择
+    tokens.append(next_id)
+    if next_id == eos_id:
+        break
+```
+
+softmax 保持同一行 logits 的大小顺序，贪心选择可直接对 logits 求 argmax。实际推理可以用 KV cache 复用历史计算，避免每轮完整重算；缓存不改变以当前前缀选择下一 token 的概率含义。
+
+训练使用已知真实文本作为每个位置的输入；普通自回归生成中，下一位置的输入依赖上一步选出的 token。因此训练可在一次前向内并行处理已知位置，而生成需逐步确定新的输入。每轮对已知前缀的内部计算仍可并行。顺序选择的原因不只是存在因果掩码，而是未来输入尚未确定。
+
+给定词表顺序“我、喜欢、数学、物理、。、&lt;eos&gt;”，三步演示使用的完整分布为：
+
+$$
+P=
+\begin{bmatrix}
+0.02&0.03&0.60&0.25&0.08&0.02\\
+0.01&0.01&0.05&0.03&0.85&0.05\\
+0.01&0.01&0.01&0.01&0.06&0.90
+\end{bmatrix}.
+$$
+
+这三行代表不同前缀下依次取得的最后位置分布，不是一次前向中三个位置的输出。CPU NumPy float64 核对各行概率和、$Z=\ln P$ 与 $P$ 的 argmax 一致，追加 ID 依次为 2、4、5，输入长度依次为 2、3、4，并在选出 ID 5（结束 token）后停止。该检查只验证给定分布下的生成流程，未运行完整 Transformer 前向或训练。
+
 ## 参考资料
+
+- [D2L：从零实现循环神经网络的解码小节](../refs/d2l-en/chapter_recurrent-neural-networks/rnn-scratch.md#decoding)：已预测 token 作为后续输入的自回归反馈；其 RNN 主干与本章 Transformer 主干不同。
+
+- [D2L：语言模型](../refs/d2l-en/chapter_recurrent-neural-networks/language-model.md)：输入—目标错位构造与平均交叉熵。
+
+- [D2L：大型预训练 Transformer 的 Decoder-Only 小节](../refs/d2l-en/chapter_attention-mechanisms-and-transformers/large-pretraining-transformers.md#decoder-only)：因果语言模型与下一 token 预测。
 
 - [RoFormer 原论文 §3.2](https://arxiv.org/html/2104.09864v5#S3.SS2)：RoPE 的二维旋转、相对位置点积与多维推广。
 - [Hugging Face：RoFormer](https://huggingface.co/docs/transformers/model_doc/roformer)：模型配置与 V 旋转选项。
