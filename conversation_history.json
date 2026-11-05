@@ -2058,6 +2058,32 @@
       "content": "答对了。前三个候选累计为 0.93，加上“喜欢”后达到 0.96，所以保留四个 token，“物理”的抽取概率为 \\(0.25/0.96\\approx26.04\\%\\)。我会整理今天的学习小结和答题记录，核对后提交并推送。",
       "channel": "commentary",
       "sequence": 223
+    },
+    {
+      "id": 224,
+      "role": "user",
+      "content": "继续学习",
+      "sequence": 224
+    },
+    {
+      "id": 225,
+      "role": "assistant",
+      "content": "上次的 top-p 检查题已经完成。今天进入 **3.8.1 从矩阵形状推导计算量**，先理解为什么序列长度翻倍，有些计算翻倍，有些却变成四倍。\n\n先限定范围：**单条序列、单头注意力、整个前缀的一次前向计算**。设序列长度为 \\(T\\)，输入、query、key 和 value 的宽度都取 \\(d\\)。\n\n**怎样数一次矩阵乘法？**\n\n对于\n\\[\nC=AB,\\qquad\nA\\in\\mathbb R^{m\\times n},\\quad\nB\\in\\mathbb R^{n\\times p},\n\\]\n输出有 \\(mp\\) 个元素，每个元素都是长度为 \\(n\\) 的点积：\n\\[\nC_{ij}=\\sum_{k=1}^{n}A_{ik}B_{kj}.\n\\]\n\n因此，按常用的乘加计数，需要约 \\(mnp\\) 次乘加，记作 \\(mnp\\) MACs。若把一次乘法和一次加法分别算一次浮点运算，就是约 \\(2mnp\\) FLOPs。这里忽略点积求和少一次加法的边界差异。\n\n**把这个规则用到已经学过的注意力。**\n\n```mermaid\nflowchart TD\n    X[\"输入 X：T × d\"] --> P[\"Q、K、V 投影：每个位置各算一次\"]\n    P --> S[\"QKᵀ：T 个 query × T 个 key\"]\n    S --> A[\"因果掩码与 softmax：得到 T × T 的 A\"]\n    A --> C[\"AV：每个位置加权汇总 value\"]\n    P -->|\"V：T × d\"| C\n```\n\n先看一个投影：\n\\[\nQ=XW_Q,\\qquad\n(T\\times d)(d\\times d)\\to T\\times d.\n\\]\n代入矩阵乘法规则，得到\n\\[\n\\boxed{Td^2\\ \\text{MACs}}.\n\\]\n每个 token 都用同一个 \\(W_Q\\) 做投影。固定宽度 \\(d\\)，token 数翻倍，计算量就翻倍。Q、K、V 三个投影合起来是 \\(3Td^2\\)。\n\n再看 query 和 key 的配对：\n\\[\nS=QK^\\top,\\qquad\n(T\\times d)(d\\times T)\\to T\\times T.\n\\]\n一共有 \\(T^2\\) 对位置，每一对做长度为 \\(d\\) 的点积，所以是\n\\[\n\\boxed{T^2d\\ \\text{MACs}}.\n\\]\n\n**序列翻倍时，query 数和 key 数同时翻倍，配对数变成四倍。** 这就是注意力中平方项的来源。[D2L 对应推导](C:/Users/Xyf/Desktop/Documents/LLM-Infra-Study/refs/d2l-en/chapter_attention-mechanisms-and-transformers/self-attention-and-positional-encoding.md:190)\n\n最后，对 value 加权：\n\\[\nC=AV,\\qquad\n(T\\times T)(T\\times d)\\to T\\times d.\n\\]\n同样需要 \\(T^2d\\) MACs。虽然输出只有 \\(Td\\) 个元素，但每个元素都要沿 \\(T\\) 个来源位置累加。\n\n取 \\(d=8\\)，比较两种长度：\n\n| 运算 | MACs 公式 | \\(T=4\\) | \\(T=8\\) |\n|---|---:|---:|---:|\n| 单个 Q 投影 | \\(Td^2\\) | 256 | 512 |\n| \\(QK^\\top\\) | \\(T^2d\\) | 128 | 512 |\n| \\(AV\\) | \\(T^2d\\) | 128 | 512 |\n\n这三行只统计相应矩阵乘法。整个 Transformer 的计算量还要计入其他投影、FFN 等部分，后续再逐项合并。\n\n还有一个和因果掩码有关的细节。上表采用**先算完整矩阵、再施加掩码的稠密计算方式**。即使实现能跳过未来位置，可见的位置对仍有\n\\[\n1+2+\\cdots+T=\\frac{T(T+1)}2.\n\\]\n它减少了配对数量，但增长阶仍为 \\(O(T^2)\\)。实际运行耗时还取决于硬件和实现，不能直接把运算次数的倍数当成耗时倍数。\n\n两道理解检查题：\n\n1. 固定 \\(d\\)，把 \\(T\\) 从 128 增加到 256。单个 Q 投影的计算量变为几倍？稠密 \\(QK^\\top\\) 的计算量变为几倍？\\(W_Q\\) 的参数量会改变吗？\n2. 固定 \\(T\\)，把 \\(d\\) 从 32 增加到 64，并保持 Q、K、V 的宽度都等于 \\(d\\)。单个 Q 投影与稠密 \\(QK^\\top\\) 的计算量分别变为几倍？\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:122-123|note=[small lessons with checks and static diagrams]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 225
+    },
+    {
+      "id": 226,
+      "role": "user",
+      "content": "1. Q计算量变2倍，\\\\(QK^\\top\\\\)计算量变4倍，\\\\(W_Q\\\\) 的参数量不变；2. Q投影计算量变4倍，\\\\(QK^\\top\\\\) 的计算量变2倍，今天就到这里，上传commit",
+      "sequence": 226
+    },
+    {
+      "id": 227,
+      "role": "assistant",
+      "content": "两题都答对了。固定宽度时，Q 投影随长度线性增长，\\(QK^\\top\\) 随长度平方增长，参数量不变；固定长度时，两者分别随宽度的平方和一次方增长。\n\n我会保存答题结果和下次起点，核对本次学习记录后提交并推送。",
+      "channel": "commentary",
+      "sequence": 227
     }
   ],
   "sources": [

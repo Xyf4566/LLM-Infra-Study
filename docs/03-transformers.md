@@ -1207,6 +1207,35 @@ flowchart TD
     P --> A
 ```
 
+## 3.8 Transformer 的基础计算与存储成本
+
+### 3.8.1 从矩阵形状推导计算量
+
+先考虑单条序列、单头注意力、整个前缀的一次前向计算。设序列长度为 $T$，输入、query、key 和 value 的宽度均为 $d$。采用常规稠密矩阵乘法计数。
+
+矩阵乘法 $(m\times n)(n\times p)\to m\times p$ 的输出有 $mp$ 个元素，每个元素是长度为 $n$ 的点积。因此计为 $mnp$ 次乘加（MACs）；按一次乘法和一次加法各计一次浮点运算，约为 $2mnp$ FLOPs。精确的直接求和计数为 $mnp$ 次乘法与 $mp(n-1)$ 次加法，常用近似忽略这项边界差异。
+
+| 运算 | 形状 | MACs |
+| --- | --- | ---: |
+| 单个 Q 投影 $XW_Q$ | $(T\times d)(d\times d)\to T\times d$ | $Td^2$ |
+| 得分 $QK^\top$ | $(T\times d)(d\times T)\to T\times T$ | $T^2d$ |
+| 汇总 $AV$ | $(T\times T)(T\times d)\to T\times d$ | $T^2d$ |
+
+Q、K、V 三个投影共 $3Td^2$ MACs。固定宽度时，投影计算量随位置数线性增长。得分矩阵包含 $T^2$ 对位置，每一对需要长度为 $d$ 的点积，因此 $QK^\top$ 随长度平方增长。$AV$ 虽然只输出 $Td$ 个元素，但每个元素需沿 $T$ 个来源位置累加，同样具有 $T^2d$ 项。[D2L：自注意力的复杂度](../refs/d2l-en/chapter_attention-mechanisms-and-transformers/self-attention-and-positional-encoding.md#comparing-cnns-rnns-and-self-attention)
+
+```mermaid
+flowchart TD
+    X["输入 X：T × d"] --> P["Q、K、V 投影：每个位置各算一次"]
+    P --> S["QKᵀ：T 个 query × T 个 key"]
+    S --> A["因果掩码与 softmax：得到 T × T 的 A"]
+    A --> C["AV：每个位置加权汇总 value"]
+    P -->|"V：T × d"| C
+```
+
+例如固定 $d=8$，长度从 $T=4$ 增加到 $T=8$，单个 Q 投影由 256 MACs 增至 512 MACs；$QK^\top$ 与 $AV$ 各自由 128 MACs 增至 512 MACs。共享的 $W_Q$ 形状仍为 $d\times d$。
+
+上述计数采用先计算完整矩阵再施加因果掩码的基线。能跳过未来位置的实现只需处理 $T(T+1)/2$ 个可见位置对，配对数量减少但增长阶仍为 $O(T^2)$。这里仅统计列出的矩阵乘法，完整模型还包括其他投影、FFN、归一化、softmax 等运算。运算量与实际耗时需区分，后者还受硬件和实现影响。
+
 ## 参考资料
 
 - [D2L：从零实现循环神经网络的解码小节](../refs/d2l-en/chapter_recurrent-neural-networks/rnn-scratch.md#decoding)：已预测 token 作为后续输入的自回归反馈；其 RNN 主干与本章 Transformer 主干不同。
