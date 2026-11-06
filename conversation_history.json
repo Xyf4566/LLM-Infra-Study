@@ -2084,6 +2084,58 @@
       "content": "两题都答对了。固定宽度时，Q 投影随长度线性增长，\\(QK^\\top\\) 随长度平方增长，参数量不变；固定长度时，两者分别随宽度的平方和一次方增长。\n\n我会保存答题结果和下次起点，核对本次学习记录后提交并推送。",
       "channel": "commentary",
       "sequence": 227
+    },
+    {
+      "id": 228,
+      "role": "user",
+      "content": "继续学习",
+      "sequence": 228
+    },
+    {
+      "id": 229,
+      "role": "assistant",
+      "content": "今天学习 **3.8.2 多头注意力与完整 block 的计算量**。沿用上次的规则：\n\\[\n(m\\times n)(n\\times p)\\quad\\Rightarrow\\quad mnp\\ \\text{MACs}.\n\\]\n\n仍然计算**单条序列、整个前缀的一次前向**，采用稠密注意力。记模型宽度为 \\(d\\)，头数为 \\(h\\)，每头 Q、K、V 的宽度均为\n\\[\nd_h=\\frac d h.\n\\]\nFFN 采用学过的两层结构 \\(d\\to d_{\\mathrm{ff}}\\to d\\)。\n\n**先把单头扩展为多头。**\n\n以 Q 投影为例，每个头都有\n\\[\nXW_Q^{(r)}:\\quad\n(T\\times d)(d\\times d_h)\\to T\\times d_h.\n\\]\n一个头需要 \\(Tdd_h\\) MACs，全部 \\(h\\) 个头加起来：\n\\[\nhTdd_h=Td^2.\n\\]\n因此，所有头的 Q、K、V 投影合计仍是 \\(3Td^2\\)。\n\n关键在于，**固定模型宽度 \\(d\\) 时，头数越多，每头越窄**。实现时也可以一次投影出宽度 \\(d\\)，再拆成 \\(h\\) 个头。[D2L 多头实现](C:/Users/Xyf/Desktop/Documents/LLM-Infra-Study/refs/d2l-en/chapter_attention-mechanisms-and-transformers/multihead-attention.md:113)\n\n同样，单头 \\(QK^\\top\\) 的成本是 \\(T^2d_h\\)，所有头合计：\n\\[\nhT^2d_h=T^2d.\n\\]\n所有头的 \\(AV\\) 也合计 \\(T^2d\\)。\n\n各头输出拼接后恢复为 \\(T\\times d\\)，还要经过输出投影：\n\\[\nY=\\operatorname{Concat}(C_1,\\ldots,C_h)W_O,\n\\qquad W_O\\in\\mathbb R^{d\\times d}.\n\\]\n这一项再花费 \\(Td^2\\)。所以，多头注意力的主要矩阵乘法合计为\n\\[\n\\boxed{\nC_{\\mathrm{MHA}}\n=\\underbrace{4Td^2}_{Q、K、V、O\\text{ 四个投影}}\n+\\underbrace{2T^2d}_{QK^\\top\\text{ 与 }AV}\n}.\n\\]\n\n这里“固定 \\(d\\) 时头数消掉”只针对这些矩阵乘法。每个头仍有自己的 \\(T\\times T\\) 注意力权重，softmax 要处理的元素总数是 \\(hT^2\\)，实际耗时也会受实现影响。\n\n**再加入逐位置 FFN。**\n\n回忆学过的两层 FFN：\n\\[\nF(U)=\\operatorname{ReLU}(UW_1+b_1)W_2+b_2.\n\\]\n其中 \\(W_1\\) 为 \\(d\\times d_{\\mathrm{ff}}\\)，\\(W_2\\) 为 \\(d_{\\mathrm{ff}}\\times d\\)。两次矩阵乘法分别需要 \\(Tdd_{\\mathrm{ff}}\\) 和 \\(Td_{\\mathrm{ff}}d\\)，合计\n\\[\n\\boxed{C_{\\mathrm{FFN}}=2Tdd_{\\mathrm{ff}}}.\n\\]\nFFN 在每个位置单独执行，因此固定宽度时，它随序列长度线性增长。[D2L 两层 FFN](C:/Users/Xyf/Desktop/Documents/LLM-Infra-Study/refs/d2l-en/chapter_attention-mechanisms-and-transformers/transformer.md:179)\n\n把这些计算放回一个 Pre-LN block：\n\n```mermaid\nflowchart TD\n    X[\"输入 X：T × d\"] --> N1[\"LayerNorm\"]\n    N1 --> M[\"多头注意力：4Td² + 2T²d MACs\"]\n    M --> R1[\"残差相加，得到 U\"]\n    X --> R1\n    R1 --> N2[\"LayerNorm\"]\n    N2 --> F[\"两层 FFN：2Td·d_ff MACs\"]\n    F --> R2[\"残差相加，得到输出\"]\n    R1 --> R2\n```\n\n因此，一个 block 的**主要矩阵乘法**成本为\n\\[\n\\boxed{\nC_{\\mathrm{block}}\n=4Td^2+2T^2d+2Tdd_{\\mathrm{ff}}\n}.\n\\]\n这个计数暂未包含归一化、softmax、激活、位置编码和残差加法等运算。\n\n例如取 \\(T=4,\\ d=8,\\ h=2,\\ d_{\\mathrm{ff}}=32\\)：\n\n| 部分 | MACs |\n|---|---:|\n| 全部头的 Q、K、V 投影 | 768 |\n| 全部头的 \\(QK^\\top\\) 和 \\(AV\\) | 256 |\n| 输出投影 \\(W_O\\) | 256 |\n| 两层 FFN | 2048 |\n| **合计** | **3328** |\n\n这个短序列例子里，FFN 占了主要部分。随着 \\(T\\) 增大，位置配对的平方项会增长得更快。\n\n若取 \\(d_{\\mathrm{ff}}=4d\\)，公式可以简化为\n\\[\n\\boxed{C_{\\mathrm{block}}=12Td^2+2T^2d}.\n\\]\n它同时包含随长度线性增长和平方增长的部分，所以不能把整个 block 的成本都当成 \\(T^2\\)。\n\n两道理解检查题：\n\n1. 固定 \\(T\\)、\\(d=256\\) 和 \\(d_{\\mathrm{ff}}\\)，把头数从 8 增加到 16。每头宽度变成多少？所有头合计的 \\(QK^\\top\\) 矩阵乘法量会翻倍吗？\n2. 固定 \\(d\\)，取 \\(d_{\\mathrm{ff}}=4d\\)，把序列长度 \\(T\\) 翻倍。公式 \\(12Td^2+2T^2d\\) 中的两项分别变成原来的几倍？整个 block 的主要矩阵乘法量是否恰好变为四倍？\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:122-123|note=[small lesson with checks and a static diagram]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 229
+    },
+    {
+      "id": 230,
+      "role": "user",
+      "content": "1. 每个头的宽度变为16，所有头合计的\\\\(QK^\\top\\\\) 矩阵乘法量不变；2. 分别变为原来的2倍和4倍，整个block计算量大约会变为4倍（如果T远大于d的话），我们继续",
+      "sequence": 230
+    },
+    {
+      "id": 231,
+      "role": "assistant",
+      "content": "两题都答对了。第一题中，每头宽度从 \\(32\\) 变为 \\(16\\)，所有头合计的 \\(QK^\\top\\) 矩阵乘法量保持不变。\n\n第二题的限定也正确。长度翻倍后的倍率为\n\\[\n\\frac{C(2T)}{C(T)}\n=\\frac{24Td^2+8T^2d}{12Td^2+2T^2d}\n=\\frac{12d+4T}{6d+T}.\n\\]\n它介于 \\(2\\) 和 \\(4\\) 之间。当 \\(T\\gg6d\\)，平方项占主导，倍率趋近 \\(4\\)。\n\n接下来是 **3.8.3 参数与中间张量的存储成本**。核心问题是：**模型参数量不变，为什么输入变长仍然可能耗尽显存？**\n\n**先把元素个数换成字节。**\n\n一个普通稠密张量的数据存储量为\n\\[\n\\boxed{\\text{元素个数}\\times\\text{每个元素的字节数}}.\n\\]\nFP32 每个元素占 4 字节，FP16 和 BF16 各占 2 字节。这里先按每个元素 2 字节估算，并使用\n\\[\n1\\ \\mathrm{MiB}=2^{20}\\ \\text{字节}.\n\\]\n\n**参数由架构决定，中间张量还随输入规模变化。**\n\n以 \\(Q=XW_Q\\) 为例，同一个 \\(W_Q\\) 会用于整个 batch 的全部位置。设 batch size 为 \\(B\\)，输入形状为 \\(B\\times T\\times d\\)。投影后拆成多头，Q 的形状为 \\(B\\times h\\times T\\times d_h\\)。\n\n```mermaid\nflowchart TD\n    W[\"参数 W_Q、W_K：各 d × d\"] --> P[\"线性投影并拆成 h 个头\"]\n    X[\"本批输入 X：B × T × d\"] --> P\n    P --> QK[\"中间张量 Q、K：各 B × h × T × d_h\"]\n    QK --> A[\"得分与 softmax：A 为 B × h × T × T\"]\n```\n\n参数保存模型学到的变换；Q、K、A 则由当前输入计算出来。同一套参数处理更长的输入，会产生更大的中间张量。\n\n仍用标准多头注意力和两层 FFN，先只数 block 中的主要权重矩阵：\n\n| 权重 | 元素个数 |\n|---|---:|\n| Q、K、V、O 四个投影 | \\(4d^2\\) |\n| FFN 的两个矩阵 | \\(2dd_{\\mathrm{ff}}\\) |\n| **合计** | **\\(4d^2+2dd_{\\mathrm{ff}}\\)** |\n\n这里没有计入偏置和 LayerNorm 参数，也没有计入 block 外的 embedding 和词表输出头。这个权重计数中没有 \\(B\\) 或 \\(T\\)，因为各样本、各位置共享参数。\n\n中间张量则不同：\n\n| 中间张量 | 元素个数 |\n|---|---:|\n| Q、K、V 中的每一个 | \\(BhTd_h=BTd\\) |\n| 完整的注意力权重 A | \\(BhT^2\\) |\n| FFN 扩张后的一个隐藏张量 | \\(BTd_{\\mathrm{ff}}\\) |\n\n**注意力权重 A 的每个元素，是某个头中一个 query 位置对一个来源位置的权重，所以它同时有两个长度轴。**\n\n看一个具体例子：\n\\[\nB=2,\\quad T=1024,\\quad d=256,\\quad h=8,\\quad d_{\\mathrm{ff}}=1024.\n\\]\n假设下面各项都以每元素 2 字节存储：\n\n| 对象 | 数据存储量 |\n|---|---:|\n| 一个 block 的主要权重矩阵 | 1.5 MiB |\n| Q、K、V 中的每一个 | 1 MiB |\n| 完整的 A | 32 MiB |\n| FFN 扩张后的一个隐藏张量 | 4 MiB |\n\n例如，A 的计算是\n\\[\n2\\times8\\times1024^2\\times2\n=33{,}554{,}432\\ \\text{字节}\n=32\\ \\mathrm{MiB}.\n\\]\n\n这里单个 A 就比这个 block 的主要权重矩阵大得多。**因此，能装下参数，并不意味着能处理任意长度的输入。**\n\n这些数值描述的是各个张量的数据大小，不能直接相加就当成程序的峰值显存。峰值还取决于哪些张量同时保留、何时释放，以及是否需要为反向传播保存数据。实际实现也可能使用不同精度，或者分块计算以避免完整存下 A。\n\n同样，给未来位置加因果掩码，并不会自动缩小一个已经分配好的 \\(B\\times h\\times T\\times T\\) 稠密张量。把元素变成零和不为它分配空间，是两件事。\n\n两道理解检查题：\n\n1. 沿用例子，只把 \\(T\\) 从 1024 增加到 2048。主要权重矩阵、单个 Q、完整 A 的存储量分别变成多少 MiB？\n2. 保持 \\(B,T,d,d_{\\mathrm{ff}}\\) 不变，只把头数从 8 增加到 16。单个 Q 的总元素数会改变吗？完整 A 的存储量会变成多少 MiB？仍按每元素 2 字节计算。\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:122-123|note=[continue in small sections with checks and a static diagram]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 231
+    },
+    {
+      "id": 232,
+      "role": "user",
+      "content": "1. 主要权重不变，单个Q，完整A存储量分别变为原来的2倍和4倍；2.单个Q元素数不变，完整A变为64 MiB，我们继续",
+      "sequence": 232
+    },
+    {
+      "id": 233,
+      "role": "assistant",
+      "content": "两题都正确。第一题的具体数值是：主要权重仍为 **1.5 MiB**，单个 Q 增至 **2 MiB**，完整 A 增至 **128 MiB**。第二题中，Q 的总元素数不变，完整 A 增至 **64 MiB**。\n\n接下来学习 **3.8.4 为什么训练通常比推理更占内存**。除了模型参数和前向中间张量，训练还需要考虑**参数梯度、优化器状态，以及为反向传播保留的数据**。\n\n**先看反向传播为什么需要前向的数据。**\n\n沿用一层线性变换，暂时把 batch 和位置合并成行：\n\\[\nY=XW.\n\\]\n设从后面传回来的梯度为 \\(G_Y=\\partial L/\\partial Y\\)，那么\n\\[\n\\boxed{G_W=X^\\top G_Y},\\qquad\nG_X=G_YW^\\top.\n\\]\n\n注意第一个式子：计算权重梯度时，需要前向用过的 \\(X\\)。因此，前向算出 \\(Y\\) 后，训练通常还要保存 \\(X\\)，供后面的反向传播使用。\n\n```mermaid\nflowchart TD\n    X[\"前向输入 X\"] --> F[\"前向：Y = XW\"]\n    W[\"参数 W\"] --> F\n    F --> L[\"后续计算与损失\"]\n    L --> G[\"反向传回 G_Y\"]\n    X --> S[\"保留 X，供反向使用\"]\n    S --> D[\"计算 G_W = XᵀG_Y\"]\n    G --> D\n    D --> U[\"优化器更新 W\"]\n    W --> U\n```\n\n在多层 Transformer 中，不同算子的反向计算需要不同的前向数据，这些被保留的中间结果也会占空间。普通推理没有反向传播需求，某个中间结果一旦不再被后续前向计算使用，就可以释放或复用其空间。\n\n也可以通过**需要时重新计算部分前向结果**来减少保存量，这就是后续会遇到的 activation checkpointing 的基本思路：用额外计算换取更少的存储。\n\n**再看参数之外还要保存什么。**\n\n设模型共有 \\(P\\) 个可训练标量参数，全部参与本次训练。现在统一采用 **FP32，每个元素 4 字节**，先核算与参数数量直接相关的部分。\n\n| 项目 | 元素个数 | 用途 |\n|---|---:|---|\n| 参数 \\(\\theta\\) | \\(P\\) | 保存模型当前的权重 |\n| 参数梯度 \\(g\\) | \\(P\\) | 保存损失对各参数的导数 |\n| 优化器状态 | 取决于算法 | 保存跨训练步使用的信息 |\n\n你之前学过的不带动量 SGD，更新为\n\\[\n\\theta\\leftarrow\\theta-\\eta g.\n\\]\n它不需要为每个参数再保存历史统计量。因此，在参数和梯度都已分配时，这两项合计约为\n\\[\n4P+4P=\\boxed{8P\\ \\text{字节}}.\n\\]\n\nAdam 则会为每个参数保存两组历史统计量，一组保存梯度的指数加权平均，另一组保存梯度平方的指数加权平均。它们都与参数具有相同形状，因此额外有 \\(2P\\) 个状态元素。此处先关注存储，优化器的更新原理后续再展开。[D2L 的 Adam 状态与实现](C:/Users/Xyf/Desktop/Documents/LLM-Infra-Study/refs/d2l-en/chapter_optimization/adam.md:72)\n\n当参数、梯度和这两组状态都采用 FP32，并且都已分配时：\n\n\\[\n\\begin{aligned}\nM_{\\text{参数相关}}\n&=\\underbrace{4P}_{\\text{参数}}\n+\\underbrace{4P}_{\\text{梯度}}\n+\\underbrace{4P+4P}_{\\text{Adam 两组状态}}\\\\\n&=\\boxed{16P\\ \\text{字节}}.\n\\end{aligned}\n\\]\n\n这个式子只统计列出的四组数组，忽略步数计数器等小项。**它还没有计入为反向传播保留的中间结果、临时工作空间等，因此不是完整训练显存。** 混合精度下各组数据的精度可能不同，也要分别计数。\n\n例如 \\(P=2^{20}=1{,}048{,}576\\)，每组 FP32 数组占 4 MiB：\n\n| 配置 | 参数相关数组的合计 |\n|---|---:|\n| 普通推理，仅保留参数 | 4 MiB |\n| 不带动量 SGD，参数与梯度 | 8 MiB |\n| Adam，参数、梯度与两组状态 | 16 MiB |\n\n表中的推理仍然需要前向中间张量。如果做自回归生成，还可能保留后面要讲的 KV cache。因此，推理占用也不能只看表中的 4 MiB。\n\n把这节和上一节连接起来：**固定模型时，参数、参数梯度和优化器状态的元素数由 \\(P\\) 决定；前向及为反向保存的中间张量，还会随 batch size、序列长度和实现方式变化。** 所以估算训练内存时，需要把这两部分分开核算。\n\n两道理解检查题：\n\n1. 沿用 \\(P=2^{20}\\)、全部 FP32 的例子，把 Adam 换成不带动量的 SGD。上述参数相关数组合计从多少 MiB 降到多少 MiB？为反向传播保留的中间结果会因此全部消失吗？\n2. 某个模型的四组 FP32 参数相关数组共占 16 MiB。保持模型不变，只把输入长度翻倍，能否据此断言完整训练显存仍然只有 16 MiB？说明原因。\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:122-123|note=[small lesson with checks and a static diagram]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 233
+    },
+    {
+      "id": 234,
+      "role": "user",
+      "content": "1. 从16MiB将为8MiB，反向传播结果不会消失；2. 不能，因为保存的中间计算结果的大小会随着输入长度增长。今天就到这里，你上传相应的commit",
+      "sequence": 234
+    },
+    {
+      "id": 235,
+      "role": "assistant",
+      "content": "两题都正确。第一题更准确地说，是“为反向传播保留的前向中间结果”仍然需要保存；换成 SGD 不会取消反向传播。\n\n我会记录今天的完成进度，核对正文和会话记录，然后提交并推送。",
+      "channel": "commentary",
+      "sequence": 235
     }
   ],
   "sources": [
