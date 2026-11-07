@@ -1357,6 +1357,49 @@ $$
 
 这些数值不代表完整运行内存。普通推理也需要前向中间结果，自回归生成还可能保留 KV cache。固定模型时，参数相关数组的元素数不随 batch size 或序列长度改变；前向及为反向保留的中间张量则受输入规模、算子实现和保存策略影响。估算总占用需将两类数据分开核算，再考虑其同时存活范围，而不是将固定的每参数字节数作为完整训练显存。
 
+## 3.9 KV cache 与增量生成
+
+### 3.9.1 为什么历史 K/V 可以复用
+
+自回归生成的基础实现会在每一步重新计算整个前缀。对标准因果 Transformer，在模型参数固定、关闭 dropout 等随机操作、已有 token 与位置编号及位置编码规则不变的条件下，追加新位置不会改变旧位置的表示。第一层的历史输出不变，后续层历史位置读取的上一层输入也不变；逐位置 LayerNorm、FFN 与残差保持这一因果性质。
+
+因此，各层历史位置投影得到的 K、V 可保存并复用。每层有自己的缓存。基础 RoPE 配置可以保存已经按位置旋转的 K，新 token 继续使用完整序列中的位置编号。[Hugging Face：缓存原理](https://huggingface.co/docs/transformers/cache_explanation)
+
+以“我、喜欢”为已处理前缀，某层某头的缓存为 $[k_0;k_1]$ 和 $[v_0;v_1]$。模型选出“物理”时，只确定了新 token，缓存仍为两个位置。下一次前向才处理位置 2，根据该位置的本层输入计算 $q_2,k_2,v_2$，并追加到缓存：
+
+$$
+K_{\text{cache}}\leftarrow[k_0;k_1;k_2],\qquad
+V_{\text{cache}}\leftarrow[v_0;v_1;v_2].
+$$
+
+新位置的注意力为
+
+$$
+a_2=\operatorname{softmax}\left(\frac{q_2K_{\text{cache}}^\top}{\sqrt{d_h}}\right),\qquad
+c_2=a_2V_{\text{cache}}.
+$$
+
+其中 $q_2$ 为 $1\times d_h$，K、V 缓存各为 $3\times d_h$，得分与权重为 $1\times3$，读取结果为 $1\times d_h$。新位置可以读取历史及自身。采用 RoPE 时，这里的 Q、K 已包含位置旋转。
+
+```mermaid
+flowchart TD
+    OLD["本层已有缓存：k₀、k₁；v₀、v₁"] --> CAT["追加 k₂、v₂，缓存长度变为 3"]
+    NEW["位置 2 的本层输入"] --> PROJ["计算新 q₂、k₂、v₂"]
+    PROJ -->|"k₂、v₂"| CAT
+    PROJ -->|"q₂"| ATT["读取缓存中的三个位置"]
+    CAT --> ATT
+    ATT --> OUT["新位置经过输出投影、残差和 FFN"]
+    OUT --> NEXT["进入下一层，使用下一层自己的缓存"]
+```
+
+新位置逐层完成计算后，经最终归一化与词表投影得到预测位置 3 的分布。高层 K、V 来自该层输入表示，不是直接重复使用第一层缓存。
+
+历史 Q 用于历史位置的输出；后续生成只需新位置的 query 来读取已有 K、V，无需再次计算旧输出，因此标准 KV cache 不需要保留历史 Q。只输入新 token 仍然利用完整前缀，因为各层历史信息由缓存提供；新 query 对历史 key 的打分和对 value 的加权读取仍然需要执行。
+
+在上述条件下，缓存与完整前缀重算数学等价，实际实现可能有浮点舍入差异。CPU NumPy float64 数值核对采用随机种子 391、单序列长度 4、模型宽度 4、2 个头、每头宽度 2，固定随机输入与三组投影矩阵，各头 Q/K 按位置编号乘 1 弧度旋转。逐个追加 K/V 得到的新位置注意力输出，与完整因果前缀计算的最后一行最大绝对误差为 $8.88\times10^{-16}$；追加新位置前后的历史输出也通过 $10^{-12}$ 容差核对。该核对仅覆盖注意力计算，不包含完整 block、词表头或语言模型生成。
+
+后续系统分析可参考 [InfraTech：KV cache 传输与重计算](https://github.com/CalvinXKY/InfraTech/blob/48e358a4b5119c24cf472adc64d0b4f86f894e99/llm_infer/kv_cache_transfer_vs_recomputation.ipynb)，其中进一步区分缓存前缀与新增序列长度，并讨论数据搬移与重计算的成本。
+
 ## 参考资料
 
 - [D2L：从零实现循环神经网络的解码小节](../refs/d2l-en/chapter_recurrent-neural-networks/rnn-scratch.md#decoding)：已预测 token 作为后续输入的自回归反馈；其 RNN 主干与本章 Transformer 主干不同。
