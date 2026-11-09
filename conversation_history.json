@@ -2162,6 +2162,45 @@
       "content": "第一题正确，第二题关于读取历史 K/V 的说明也正确。再补充一点：历史 query 用于计算历史位置的输出；那些输出已经完成，生成新位置时只需要新的 query，因此无需重算历史 query。\n\n我会保存本节答题结果和下次起点，核对后提交并推送。",
       "channel": "commentary",
       "sequence": 239
+    },
+    {
+      "id": 240,
+      "role": "user",
+      "content": "继续学习",
+      "sequence": 240
+    },
+    {
+      "id": 241,
+      "role": "assistant",
+      "content": "今天学习 **3.9.2 prefill 与 decode 的阶段区别及张量形状**。\n\n上次已经确认，历史 K/V 可以缓存。现在把一次生成拆成两个阶段。先讨论**缓存初始为空、标准多头注意力、没有 padding、每次 decode 处理一个新 token**的情况。\n\n**Prefill：处理已经给定的提示词，建立缓存。**\n\n提示词是“我、喜欢”，两个 token 都已经知道。模型可以在每一层同时处理这两个位置，同时用因果掩码限制读取范围。\n\n处理完后，会得到：\n\n- 每一层对应“我、喜欢”的 K/V 缓存。\n- 提示词各位置的最终隐藏表示。\n\n其中，**最后一个位置“喜欢”的输出用于预测提示词之后的第一个 token**。假设选出“物理”，它就是第一个生成结果。此时缓存长度仍为 2，因为“物理”尚未经过前向。\n\n**Decode：处理刚选出的 token，预测再下一个。**\n\n接下来只把“物理”作为位置 2 的新输入，结合各层已有缓存完成前向。处理后缓存长度变为 3，再从本次输出选出下一个 token，例如“句号”。\n\n```mermaid\nflowchart TD\n    P[\"Prefill：输入 我、喜欢\"] --> C2[\"各层缓存长度为 2\"]\n    C2 --> S1[\"用提示词最后位置的输出，选出 物理\"]\n    S1 --> D1[\"第 1 次 decode：输入 物理，位置 2\"]\n    D1 --> C3[\"各层缓存长度为 3\"]\n    C3 --> S2[\"用本次输出，选出 句号\"]\n    S2 --> D2[\"第 2 次 decode：输入 句号，位置 3\"]\n    D2 --> C4[\"各层缓存长度为 4，再预测后续 token\"]\n```\n\n所以，**第一个新 token 可以直接从 prefill 的最后位置输出中选出；第一次 decode 处理这个 token，产生第二个新 token 的分布。**\n\n**两个阶段的矩阵形状有什么不同？**\n\n记 batch size 为 \\(B\\)，头数为 \\(h\\)，每头宽度为 \\(d_h=d/h\\)。Prefill 的提示词长度记为 \\(T\\)；某次 decode 开始前，已缓存的位置数记为 \\(N\\)。\n\n下面都是**某一层**的形状：\n\n| 张量 | Prefill | 一次单 token decode |\n|---|---|---|\n| 本次新计算的 Q | \\(B\\times h\\times T\\times d_h\\) | \\(B\\times h\\times1\\times d_h\\) |\n| 本次新计算的 K、V，各自 | \\(B\\times h\\times T\\times d_h\\) | \\(B\\times h\\times1\\times d_h\\) |\n| 追加后用于读取的 K、V，各自 | \\(B\\times h\\times T\\times d_h\\) | \\(B\\times h\\times(N+1)\\times d_h\\) |\n| 注意力得分或权重 | \\(B\\times h\\times T\\times T\\) | \\(B\\times h\\times1\\times(N+1)\\) |\n| 各头读取结果 | \\(B\\times h\\times T\\times d_h\\) | \\(B\\times h\\times1\\times d_h\\) |\n\n这里区分了**本次新算出的 K/V**和**追加后完整可读取的 K/V**。对应实现可以对照 InfraTech 中的基础 prefill 与单步 decode 示例。[InfraTech 参考 Notebook](https://github.com/CalvinXKY/InfraTech/blob/48e358a4b5119c24cf472adc64d0b4f86f894e99/llm_infer/chunked_prefill_and_flash_decoding.ipynb)\n\n忽略 batch 和头这两个外层维度，单次 decode 的核心乘法是：\n\\[\n\\underbrace{Q_{\\text{new}}}_{1\\times d_h}\n\\underbrace{K_{\\text{all}}^\\top}_{d_h\\times(N+1)}\n\\longrightarrow\n\\underbrace{S}_{1\\times(N+1)}.\n\\]\n\n然后沿来源位置做 softmax，再读取 V：\n\\[\n\\underbrace{A}_{1\\times(N+1)}\n\\underbrace{V_{\\text{all}}}_{(N+1)\\times d_h}\n\\longrightarrow\n\\underbrace{C}_{1\\times d_h}.\n\\]\n\n**新 query 只有一行，历史 K/V 仍然有很多行。** 拼接各头并经过输出投影后，本次注意力输出形状为 \\(B\\times1\\times d\\)，后续 FFN 也只处理这个新位置。\n\n**因果掩码在两阶段怎样体现？**\n\n“我、喜欢”的 prefill 中，可见关系为\n\\[\n\\begin{bmatrix}\n1&0\\\\\n1&1\n\\end{bmatrix}.\n\\]\n第一行不能读取第二个位置。这里的 1 表示允许读取，0 表示禁止读取。\n\n处理“物理”的单步 decode 中，query 位于位置 2，可见的 K/V 已经包含位置 0、1、2，因此这一行的可见关系为\n\\[\n\\begin{bmatrix}1&1&1\\end{bmatrix}.\n\\]\n在当前这些假设下，可读取范围内没有未来位置需要屏蔽。关键是按**完整序列中的位置编号**判断可见性；“query 只有一行”并不意味着它只能读取第 0 个 key。\n\n最后，prefill 能同时处理多个位置，是因为提示词已经全部给定，同一层各位置的输出不构成逐 token 的递归依赖。普通自回归生成中，下一个要输入的 token 要等当前选择完成后才知道，所以 decode 步骤之间仍然需要依次推进。\n\n两道理解检查题：\n\n1. 取 \\(B=2,h=4,d=128\\)，提示词长度 \\(T=6\\)。Prefill 时 Q 和注意力得分的形状分别是什么？随后第一次单 token decode 中，Q、追加后的 K 缓存、注意力得分的形状分别是什么？\n2. 一个长度为 6 的提示词完成 prefill 后，模型刚选出第一个新 token。此时每层缓存长度是多少？要得到第二个新 token 的分布，下一次应把哪个 token 送入模型？\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:122-123|note=[small lesson with checks and a static diagram]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 241
+    },
+    {
+      "id": 242,
+      "role": "user",
+      "content": "1. 分别是 [2,4,6,32] 和 [2,4,6,6], 随后是[2,4,1,32]，[2,4,7,32]和[2,4,1,7]；2. 缓存长度为6，下一次应该把第一个新 token送入模型。我们继续",
+      "sequence": 242
+    },
+    {
+      "id": 243,
+      "role": "assistant",
+      "content": "两题都正确。每头宽度为 \\(128/4=32\\)，prefill 和第一次 decode 的五个形状都对；选出首个新 token 时，缓存仍长 6，下一次前向才处理这个新 token。\n\n今天继续 **3.9.3 单步 decode 的计算量与 KV cache 大小**。\n\n沿用标准多头注意力、两层 FFN，每次 decode 为每条序列处理一个新 token。记本次追加后可读取的总长度为\n\\[\nt=N+1,\n\\]\n其中 \\(N\\) 是本次开始前的缓存长度。\n\n**先算一条序列、一个 block 的主要矩阵乘法。**\n\n上次的形状已经说明，本次只有一个新位置需要计算 Q/K/V、输出投影和 FFN：\n\n| 部分 | 本次计算量（MACs） |\n|---|---:|\n| 新位置的 Q、K、V 投影 | \\(3d^2\\) |\n| 所有头的新 Q 与完整 K 打分 | \\(td\\) |\n| 所有头对完整 V 加权读取 | \\(td\\) |\n| 新位置的输出投影 | \\(d^2\\) |\n| 新位置的两层 FFN | \\(2dd_{\\mathrm{ff}}\\) |\n\n其中，打分这一项来自\n\\[\nh\\times(1\\times d_h\\times t)=td.\n\\]\n因此合计为\n\\[\n\\boxed{\nC_{\\text{decode}}\n=4d^2+2td+2dd_{\\mathrm{ff}}\n}.\n\\]\n\n若 \\(d_{\\mathrm{ff}}=4d\\)，就是\n\\[\n\\boxed{C_{\\text{decode}}=12d^2+2td}.\n\\]\n\n对照之前**重新计算长度为 \\(t\\) 的完整前缀**的稠密基线：\n\\[\nC_{\\text{完整重算}}=12td^2+2t^2d.\n\\]\n\n缓存使后续步骤无需重算历史位置的投影、FFN 和旧注意力输出。本次仍需让新 query 读取全部历史 K/V，因此 **decode 的注意力计算随当前总长度线性增长，并没有变成固定成本**。\n\n这些公式只统计列出的矩阵乘法，未计入 softmax、归一化、词表头等，也不能直接换算成实际加速倍数。\n\n**再算缓存本身占多少空间。**\n\n记模型有 \\(L\\) 层，batch size 为 \\(B\\)，每层、每条序列当前都缓存了 \\(t\\) 个位置。每层的 K 和 V 各有\n\\[\nBhtd_h=Btd\n\\]\n个元素。\n\n两份张量、所有层合起来，如果每个元素占 \\(s\\) 字节：\n\\[\n\\boxed{\nM_{\\text{KV}}=2LBtds\\ \\text{字节}\n}.\n\\]\n\n各个因子的含义是：\n\n| 因子 | 含义 |\n|---|---|\n| \\(2\\) | K 和 V 两份 |\n| \\(L\\) | 每一层都有独立缓存 |\n| \\(B\\) | 每条序列有自己的缓存 |\n| \\(t\\) | 每条序列已处理的位置数 |\n| \\(d\\) | 标准多头中，所有头宽度之和 |\n| \\(s\\) | 每个元素的字节数 |\n\n这里没有额外再乘一次头数，因为已经用 \\(hd_h=d\\) 合并了所有头。\n\n```mermaid\nflowchart TD\n    T[\"已处理长度 t 增加\"] --> KV[\"各层 K/V 缓存增大：2LBtds 字节\"]\n    T --> A[\"新 query 需要读取更多历史位置\"]\n    A --> C[\"单序列单层注意力乘法：2td MACs\"]\n    NEW[\"每步只有一个新位置\"] --> P[\"投影与 FFN：4d² + 2d·d_ff MACs\"]\n```\n\n取一个具体配置：\n\\[\nL=12,\\quad B=2,\\quad t=1024,\\quad d=256,\\quad s=2.\n\\]\n则\n\\[\n\\begin{aligned}\nM_{\\text{KV}}\n&=2\\times12\\times2\\times1024\\times256\\times2\\\\\n&=25{,}165{,}824\\ \\text{字节}\\\\\n&=\\boxed{24\\ \\mathrm{MiB}}.\n\\end{aligned}\n\\]\n\n当这个 batch 中每条序列都再处理一个 token，缓存新增量为\n\\[\n\\Delta M_{\\text{KV}}=2LBds\n=24{,}576\\ \\text{字节}\n=24\\ \\mathrm{KiB}.\n\\]\n\n这里的 \\(24\\ \\mathrm{MiB}\\) 是**所有层、两条序列的有效 K/V 数据合计**。它不包括参数、临时注意力结果等；如果实现提前预留缓存容量，实际分配量还可能更大。\n\n把两部分连起来看：**KV cache 用持续保留历史 K/V 的空间，减少后续步骤中的重复计算；序列越长，要保存和读取的历史 K/V 也越多。**\n\n两道理解检查题：\n\n1. 沿用 \\(L=12,B=2,d=256,s=2\\) 的例子，把缓存长度从 1024 增加到 2048，KV cache 变为多少 MiB？每条序列再处理一个 token 时，整个 batch 的缓存新增量还是 24 KiB 吗？\n2. 固定 \\(d\\) 且 \\(d_{\\mathrm{ff}}=4d\\)，把当前总长度 \\(t\\) 翻倍。单步 decode 的 \\(12d^2\\) 和 \\(2td\\) 两项分别如何变化？总计算量是否一定翻倍？\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:113-114|note=[small lesson with checks and a static diagram]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 243
+    },
+    {
+      "id": 244,
+      "role": "user",
+      "content": "1. 变为48MiB，缓存新增量还是 24 KiB；2. 分别是不变和变为两倍，总计算量不一定翻倍，当t远大于d时候可以近似看作翻倍。今天就到这里，保存并上传commit",
+      "sequence": 244
+    },
+    {
+      "id": 245,
+      "role": "assistant",
+      "content": "两题都正确。总长度翻倍时，单步 decode 的固定项不变、注意力项翻倍；当 \\(t\\gg6d\\) 时，注意力项占主导，总量就接近翻倍。\n\n我会保存今天的答题结果和学习进度，核对正文与会话记录后提交并推送。",
+      "channel": "commentary",
+      "sequence": 245
     }
   ],
   "sources": [

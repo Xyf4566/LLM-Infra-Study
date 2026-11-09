@@ -1400,6 +1400,89 @@ flowchart TD
 
 后续系统分析可参考 [InfraTech：KV cache 传输与重计算](https://github.com/CalvinXKY/InfraTech/blob/48e358a4b5119c24cf472adc64d0b4f86f894e99/llm_infer/kv_cache_transfer_vs_recomputation.ipynb)，其中进一步区分缓存前缀与新增序列长度，并讨论数据搬移与重计算的成本。
 
+### 3.9.2 Prefill 与 decode 的阶段区别及张量形状
+
+考虑初始缓存为空、无 padding 的标准多头因果模型，采用单 token decode。
+
+Prefill 处理已经给定的提示词，在每一层建立各位置的 K/V 缓存。提示词各位置可在同层并行处理，但注意力仍施加因果掩码。最后位置的最终隐藏表示经过词表头，提供第一个生成 token 的分布。选出这个 token 时，它尚未写入缓存。
+
+随后每次 decode 将刚选出的 token 作为新输入，逐层追加该位置的 K/V，并计算新位置的输出以预测再下一个 token。提示词长度为 2 的例子如下。
+
+```mermaid
+flowchart TD
+    P["Prefill：输入 我、喜欢"] --> C2["各层缓存长度为 2"]
+    C2 --> S1["用提示词最后位置的输出，选出 物理"]
+    S1 --> D1["第 1 次 decode：输入 物理，位置 2"]
+    D1 --> C3["各层缓存长度为 3"]
+    C3 --> S2["用本次输出，选出 句号"]
+    S2 --> D2["第 2 次 decode：输入 句号，位置 3"]
+    D2 --> C4["各层缓存长度为 4，再预测后续 token"]
+```
+
+设 batch size 为 $B$，头数为 $h$，每头宽度为 $d_h=d/h$，提示词长度为 $T$。某次 decode 开始前已缓存 $N$ 个位置，则该层的逻辑张量形状为：
+
+| 张量 | Prefill | 单 token decode |
+| --- | --- | --- |
+| 本次新计算的 Q | $B\times h\times T\times d_h$ | $B\times h\times1\times d_h$ |
+| 本次新计算的 K、V，各自 | $B\times h\times T\times d_h$ | $B\times h\times1\times d_h$ |
+| 追加后用于读取的 K、V，各自 | $B\times h\times T\times d_h$ | $B\times h\times(N+1)\times d_h$ |
+| 注意力得分或权重 | $B\times h\times T\times T$ | $B\times h\times1\times(N+1)$ |
+| 各头读取结果 | $B\times h\times T\times d_h$ | $B\times h\times1\times d_h$ |
+
+单个头的 decode 得分乘法为 $(1\times d_h)(d_h\times(N+1))\to1\times(N+1)$，沿来源位置 softmax 后，再执行 $(1\times(N+1))((N+1)\times d_h)\to1\times d_h$。拼接各头并输出投影后，形状为 $B\times1\times d$，FFN 也只处理新位置。上述形状描述注意力数学关系，不要求实现一定将完整得分或权重矩阵写入显存。[InfraTech 基础 prefill 与 decode 示例](https://github.com/CalvinXKY/InfraTech/blob/48e358a4b5119c24cf472adc64d0b4f86f894e99/llm_infer/chunked_prefill_and_flash_decoding.ipynb)
+
+对于“我、喜欢”的 prefill，允许读取的位置关系为 $[[1,0],[1,1]]$。处理位置 2 的“物理”时，K/V 已包含位置 0、1、2，单行可见关系为 $[[1,1,1]]$。应按完整序列位置判断因果关系，而不是把局部 query 行号 0 当作绝对位置 0。无 padding 且只读取有效缓存的这一单 token 情况下，可见范围内不存在未来位置。
+
+Prefill 并行的依据是输入 token 已给定，同层输出之间没有逐 token 递归依赖；层与层仍按依赖顺序执行。普通自回归 decode 的下一输入要等当前采样或贪心选择确定，因此不同生成步骤依次推进。
+
+CPU NumPy 的零值张量形状核对采用 $B=1,h=2,d=8,T=2$：prefill 得分为 $1\times2\times2\times2$，第一次 decode 追加后 K 为 $1\times2\times3\times4$，得分为 $1\times2\times1\times3$，读取结果为 $1\times2\times1\times4$；绝对位置可见关系也已核对。此核对只验证形状与掩码，不是完整模型生成或性能实验。
+
+### 3.9.3 单步 decode 的计算量与 KV cache 大小
+
+考虑标准多头注意力和两层 FFN，每次 decode 为每条序列处理一个新 token。令 $N$ 为本次开始前的缓存长度，$t=N+1$ 为追加后可读取的总长度。先按单序列、单 block 统计主要矩阵乘法：
+
+| 部分 | MACs |
+| --- | ---: |
+| 新位置 Q、K、V 投影 | $3d^2$ |
+| 所有头的新 Q 与完整 K 打分 | $td$ |
+| 所有头对完整 V 加权读取 | $td$ |
+| 新位置输出投影 | $d^2$ |
+| 新位置两层 FFN | $2dd_{\mathrm{ff}}$ |
+
+每头打分成本为 $td_h$，合计 $htd_h=td$。所以
+
+$$
+C_{\text{decode}}=4d^2+2td+2dd_{\mathrm{ff}}.
+$$
+
+当 $d_{\mathrm{ff}}=4d$ 时，单步成本为 $12d^2+2td$；重新计算长度为 $t$ 的完整前缀的稠密基线则为 $12td^2+2t^2d$。缓存避免重算历史位置的投影、FFN 与旧输出，但新 query 仍需读取历史 K/V，因而单步注意力计算随总长度线性增长。这里仅计列出的矩阵乘法，不含 softmax、归一化、词表头等，运算量比例不能直接当作实际耗时比例。
+
+设模型含 $L$ 层、batch size 为 $B$、各条序列都已处理 $t$ 个位置、每个缓存元素占 $s$ 字节。每层的 K、V 各有 $Bhtd_h=Btd$ 个元素，全部有效缓存数据合计
+
+$$
+M_{\text{KV}}=2LBhtd_hs=2LBtds\ \text{字节}.
+$$
+
+因子 2 表示 K、V 两份，$L$ 表示独立的逐层缓存，$B$ 表示各条序列的缓存。头数已通过 $hd_h=d$ 合并，不能额外再乘一次 $h$。该公式采用标准多头各头 K/V 宽度均为 $d/h$ 的配置。
+
+```mermaid
+flowchart TD
+    T["已处理长度 t 增加"] --> KV["各层 K/V 缓存增大：2LBtds 字节"]
+    T --> A["新 query 需要读取更多历史位置"]
+    A --> C["单序列单层注意力乘法：2td MACs"]
+    NEW["每步只有一个新位置"] --> P["投影与 FFN：4d² + 2d·d_ff MACs"]
+```
+
+取 $L=12,B=2,t=1024,d=256,s=2$，有效缓存数据大小为 $25165824$ 字节，即 24 MiB。当 batch 中每条序列都再处理一个 token，新增量为
+
+$$
+\Delta M_{\text{KV}}=2LBds=24576\ \text{字节}=24\ \mathrm{KiB}.
+$$
+
+固定架构、batch size 与存储精度时，增长一个位置所需的有效数据量与原缓存长度无关。这里采用 $1\ \mathrm{KiB}=2^{10}$ 字节、$1\ \mathrm{MiB}=2^{20}$ 字节。示例已作算术核对，未测量运行时内存或延迟。
+
+有效缓存数据量不含参数、临时注意力结果、工作空间或分配器开销。预分配容量的实现中，实际分配量可能大于有效数据量，也未必逐 token 重新分配。KV cache 通过持续保留历史 K/V 来减少重复计算；缓存越长，要保存和读取的历史数据也越多。
+
 ## 参考资料
 
 - [D2L：从零实现循环神经网络的解码小节](../refs/d2l-en/chapter_recurrent-neural-networks/rnn-scratch.md#decoding)：已预测 token 作为后续输入的自回归反馈；其 RNN 主干与本章 Transformer 主干不同。
