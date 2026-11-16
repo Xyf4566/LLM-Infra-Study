@@ -2201,6 +2201,71 @@
       "content": "两题都正确。总长度翻倍时，单步 decode 的固定项不变、注意力项翻倍；当 \\(t\\gg6d\\) 时，注意力项占主导，总量就接近翻倍。\n\n我会保存今天的答题结果和学习进度，核对正文与会话记录后提交并推送。",
       "channel": "commentary",
       "sequence": 245
+    },
+    {
+      "id": 246,
+      "role": "user",
+      "content": "继续学习",
+      "sequence": 246
+    },
+    {
+      "id": 247,
+      "role": "assistant",
+      "content": "今天学习 **3.9.4 MQA/GQA：让多个 query 头共享 K/V**。\n\n上次标准多头注意力的缓存大小是\n\\[\nM_{\\text{KV}}=2LBtds.\n\\]\n其中默认每个 query 头都有自己的一套 K/V。现在考虑：**保留多个 query 头，但让其中一些头读取同一套 K/V，能否减少缓存？**\n\nMQA 在 2019 年提出，让所有 query 头共享一套 K/V，以减少增量生成中需要保存和读取的 K/V 数据。GQA 则按组共享，在全部独立与全部共享之间提供选择。[MQA 原论文](https://arxiv.org/abs/1911.02150)、[GQA 原论文](https://arxiv.org/html/2305.13245v3)\n\n**先把两种头数分开。**\n\n- \\(h_q\\)：query 头数。\n- \\(h_{kv}\\)：K/V 头数，即有多少套独立的 K 和 V。\n- 每头宽度仍取 \\(d_h=d/h_q\\)。\n\n考虑等大小分组，要求 \\(h_{kv}\\) 能整除 \\(h_q\\)。每套 K/V 被 \\(h_q/h_{kv}\\) 个 query 头共享。\n\n以 \\(h_q=8\\) 为例：\n\n| 结构 | Query 头数 | K/V 头数 | 每套 K/V 服务几个 query 头 |\n|---|---:|---:|---:|\n| MHA，多头注意力 | 8 | 8 | 1 |\n| GQA，分组 query 注意力 | 8 | 2 | 4 |\n| MQA，多 query 注意力 | 8 | 1 | 8 |\n\n因此，MQA 和 MHA 也可以看作这种分组方式的两个端点。\n\n下面是 \\(h_q=8,h_{kv}=2\\) 的分组关系。箭头表示 query 头读取对应的共享 K/V：\n\n```mermaid\nflowchart LR\n    Q0[\"Query 头 0、1、2、3\"] --> KV0[\"共享第 0 套 K/V\"]\n    Q1[\"Query 头 4、5、6、7\"] --> KV1[\"共享第 1 套 K/V\"]\n```\n\n**共享 K/V，是否意味着组内各头输出相同？**\n\n不保证。各个 query 头仍有自己的 Q 投影。设头 \\(r\\) 属于组 \\(g(r)\\)，它的单步读取为\n\\[\na^{(r)}\n=\\operatorname{softmax}\n\\left(\n\\frac{q^{(r)}(K^{(g(r))})^\\top}{\\sqrt{d_h}}\n\\right),\n\\qquad\nc^{(r)}=a^{(r)}V^{(g(r))}.\n\\]\n\n即使 K、V 相同，不同的 \\(q^{(r)}\\) 仍可能得到不同的注意力权重，从而产生不同的读取结果。所有 query 头的结果最后仍然拼接成宽度\n\\[\nh_qd_h=d,\n\\]\n再经过输出投影。\n\n这里减少的是 **K/V 的独立头数**，query 头数仍为 8。\n\n**缓存公式怎样变化？**\n\n每层的 K、V 现在各自具有形状\n\\[\n[B,\\ h_{kv},\\ t,\\ d_h].\n\\]\n所以所有层的有效缓存大小变为\n\\[\n\\boxed{\nM_{\\text{KV}}\n=2LBt\\,h_{kv}d_hs\n=2LBtds\\frac{h_{kv}}{h_q}\n}.\n\\]\n\n在其他条件相同时，相对于 MHA：\n\\[\n\\boxed{\n\\frac{M_{\\text{GQA/MQA}}}{M_{\\text{MHA}}}\n=\\frac{h_{kv}}{h_q}\n}.\n\\]\n\n沿用上次的配置：\n\\[\nL=12,\\ B=2,\\ t=1024,\\ d=256,\\ s=2,\n\\]\n并明确 \\(h_q=8\\)，则 \\(d_h=32\\)。\n\n| 结构 | 每层 K 缓存形状，V 同形状 | 全部层的 K/V 合计 |\n|---|---|---:|\n| MHA，\\(h_{kv}=8\\) | \\([2,8,1024,32]\\) | 24 MiB |\n| GQA，\\(h_{kv}=2\\) | \\([2,2,1024,32]\\) | 6 MiB |\n| MQA，\\(h_{kv}=1\\) | \\([2,1,1024,32]\\) | 3 MiB |\n\n注意，GQA 中每头宽度仍为 \\(256/8=32\\)，**不会因为只有两个 K/V 头，就把每个 K/V 头扩大成 \\(256/2=128\\) 维**。\n\n上述缓存按共享 K/V 只存一份计算。每个 query 头仍要计算自己的注意力权重，因此单步得分的逻辑形状仍为\n\\[\n[B,\\ h_q,\\ 1,\\ t].\n\\]\n减少 K/V 头数，并不意味着所有注意力计算都按同样比例减少。\n\n还有一个和上一节不同的地方：KV cache 复用的是同一个模型已有的计算结果；MQA/GQA 则改变了 K/V 投影的结构与共享关系。将一个已训练的 MHA 模型直接改成 GQA，不能保证输出保持不变。GQA 原论文讨论了转换权重后继续训练，让模型适应这种结构的方法。[GQA 的转换与训练方法](https://arxiv.org/html/2305.13245v3#S2.SS1)\n\n两道理解检查题：\n\n1. 取 \\(h_q=8,h_{kv}=2,d=256\\)。每个 K/V 头宽度是多少？每套 K/V 被几个 query 头共享？同配置 MHA 的缓存若为 24 MiB，这个 GQA 的缓存是多少？\n2. 同组两个 query 头读取完全相同的 K、V，它们的注意力权重和输出一定相同吗？请说明原因。\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:113-114|note=[small lesson with checks and a static diagram]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 247
+    },
+    {
+      "id": 248,
+      "role": "user",
+      "content": "1.每个kv头宽度是2，被4个query头共享，这个GQA缓存为6MiB；2.不一定相同，注意力权重和输出还依赖于不同的query，所以不一定相同。我们继续",
+      "sequence": 248
+    },
+    {
+      "id": 249,
+      "role": "assistant",
+      "content": "第一题里，每个 K/V 头的宽度应为\n\\[\nd_h=\\frac{d}{h_q}=\\frac{256}{8}=\\boxed{32},\n\\]\n不是 2。**2 是 K/V 头数，32 是每个头的宽度。** 每套 K/V 被 4 个 query 头共享、缓存为 6 MiB，这两点都正确。\n\n第二题也正确。不同 query 可能对同一组 K/V 产生不同的注意力权重和输出。\n\n接下来学习 **3.9.5 GQA 的投影参数与计算量**。继续固定\n\\[\nd=256,\\qquad h_q=8,\\qquad h_{kv}=2,\\qquad d_h=32.\n\\]\n\n**先看投影矩阵怎样改变。**\n\nQ 仍需要生成 8 个头，每头 32 维，所以总宽度为 256。K、V 各只需要生成 2 个头，总宽度为\n\\[\nh_{kv}d_h=2\\times32=64.\n\\]\n\n采用行向量右乘权重的约定，四个矩阵的形状为：\n\n| 矩阵 | MHA | 当前 GQA |\n|---|---|---|\n| \\(W_Q\\) | \\(256\\times256\\) | \\(256\\times256\\) |\n| \\(W_K\\) | \\(256\\times256\\) | \\(256\\times64\\) |\n| \\(W_V\\) | \\(256\\times256\\) | \\(256\\times64\\) |\n| \\(W_O\\) | \\(256\\times256\\) | \\(256\\times256\\) |\n\n\\(W_O\\) 的输入宽度保持 256，因为仍有 8 个 query 头各自产生一个 32 维读取结果。\n\n```mermaid\nflowchart TD\n    X[\"新位置输入：1 × 256\"] --> Q[\"Q 投影：1 × 256，拆成 8 个头\"]\n    X --> K[\"K 投影：1 × 64，拆成 2 个头\"]\n    X --> V[\"V 投影：1 × 64，拆成 2 个头\"]\n    K --> KV[\"追加到对应的两套 K/V 缓存\"]\n    V --> KV\n    Q --> A[\"8 个 query 头分别打分、读取\"]\n    KV --> A\n    A --> C[\"8 个输出拼接：1 × 256\"]\n    C --> O[\"输出投影：256 × 256\"]\n```\n\n先只数这四个矩阵的权重，不含偏置。令\n\\[\nr=\\frac{h_{kv}}{h_q}.\n\\]\n那么 Q 和 O 各有 \\(d^2\\) 个参数，K 和 V 各有 \\(rd^2\\) 个参数，合计\n\\[\n\\boxed{P_{\\text{投影}}=(2+2r)d^2}.\n\\]\n\n当前 \\(r=1/4\\)，所以\n\\[\nP_{\\text{投影}}=2.5d^2=163{,}840.\n\\]\nMHA 对应 \\(4d^2=262{,}144\\)，因此这四个矩阵的参数量变为原来的 **62.5%**。缓存变为 25%，投影参数却变为 62.5%，原因是 Q、O 两个矩阵保持原来的大小。\n\n**再看一次 decode 的计算量。**\n\n一条序列的新输入只有一行，所以四个投影的矩阵乘法量为\n\\[\n(2+2r)d^2\\ \\text{MACs}.\n\\]\n\n注意力打分则仍然有 \\(h_q\\) 个 query 头。每个头都要与 \\(t\\) 个位置的 key 做长度为 \\(d_h\\) 的点积，因此所有头合计\n\\[\nh_qtd_h=td.\n\\]\n各头用自己的权重读取 V，再需要 \\(td\\) MACs。\n\n**共享的是 K/V 数据，各 query 头的打分和读取仍分别计算。** InfraTech 的 GQA 成本示例也区分了 query 头数与 K/V 头数，分别用于注意力运算和缓存计数。[InfraTech GQA 成本示例](https://github.com/CalvinXKY/InfraTech/blob/48e358a4b5119c24cf472adc64d0b4f86f894e99/llm_infer/kv_cache_transfer_vs_recomputation.ipynb)\n\n加上未改变的两层 FFN，一条序列、一个 block 的单步 decode 主要矩阵乘法量为\n\\[\n\\boxed{\nC_{\\text{GQA}}\n=(2+2r)d^2+2td+2dd_{\\mathrm{ff}}\n}.\n\\]\n\n取 \\(d_{\\mathrm{ff}}=4d\\)，得到\n\\[\nC_{\\text{GQA}}=(10+2r)d^2+2td.\n\\]\n在当前 \\(r=1/4\\) 的例子中：\n\\[\n\\boxed{C_{\\text{GQA}}=10.5d^2+2td},\n\\qquad\nC_{\\text{MHA}}=12d^2+2td.\n\\]\n\n可以看到，K/V 投影成本降低了，但 Q/O 投影、FFN，以及 \\(2td\\) 这部分注意力乘法量都保持不变。\n\n这些仍然是运算次数，未计 softmax、归一化、词表头等。实际耗时还受到数据读取速度和算子实现影响，不能直接根据缓存缩小比例推断加速倍数。\n\n两道理解检查题：\n\n1. 固定 \\(d=256,h_q=8\\)，将 GQA 的 \\(h_{kv}\\) 从 2 改成 4。此时 \\(W_K\\) 的形状是什么？Q、K、V、O 四个投影矩阵合计的参数量，是同宽度 MHA 的几分之几？\n2. 在 \\(h_q=8,h_{kv}=2\\) 的 GQA 中，KV cache 为 MHA 的四分之一。能否据此说新 query 与全部 key 打分的矩阵乘法量也变成四分之一？为什么？\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:113-114|note=[small lesson with checks and a static diagram]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 249
+    },
+    {
+      "id": 250,
+      "role": "user",
+      "content": "1. \\\\(W_K\\\\) 的形状是256\\*128，是同宽度 MHA 的四分之三；2.不能，因为共享的是 K/V 数据，各 query 头的打分和读取仍分别计算。我们继续",
+      "sequence": 250
+    },
+    {
+      "id": 251,
+      "role": "assistant",
+      "content": "两题都正确。\\(W_K\\) 为 \\(256\\times128\\)；你说的 \\(3/4\\) 对应 **Q、K、V、O 四个投影矩阵的总参数量**。各 query 头的打分和读取仍分别计算，因此不能用缓存比例推断注意力计算量。\n\n接下来学习 **3.9.6 计算量、数据搬移与耗时**，给前面的成本分析补上运行时间这一环。\n\n**执行一次计算，既要做运算，也要读取和写入数据。**\n\n例如 \\(qK^\\top\\)：除了完成点积，还需要让计算单元拿到 Q、K 的数据。因此，估计时间至少要看两类约束：\n\n| 工作量 | 硬件速率上限 | 对应时间下界 |\n|---|---|---|\n| \\(F\\)：浮点运算次数 | \\(P\\)：计算吞吐，FLOP/s | \\(F/P\\) |\n| \\(D\\)：搬移的字节数 | \\(\\beta\\)：内存带宽，byte/s | \\(D/\\beta\\) |\n\n这里沿用一次乘加计为 2 FLOPs 的约定。\\(F\\) 是运算**次数**，\\(P\\) 是每秒最多能完成多少次。\n\n我们先只考察**显存与芯片之间的数据搬移**，不讨论 CPU 与 GPU 之间的传输。\n\n**数据搬移量 \\(D\\)，与显存占用量不同。**\n\n假设一个 K 张量占 8 MB：\n\n- 从显存完整读取一次，读流量为 8 MB。\n- 如果计算过程中从显存完整读取两次，读流量就是 16 MB，张量本身仍只占 8 MB。\n- 如果第一次读取后能在片上缓存中复用，第二次使用就未必需要再次读取显存。\n\n所以，“共享 K/V”带来了复用机会；实际节省多少显存读取，还取决于实现是否利用了这种复用。\n\n**两个时间约束要同时满足。**\n\n令实际耗时为 \\(\\tau\\)，那么在上述速率上限下：\n\\[\n\\tau\\geq\\frac{F}{P},\n\\qquad\n\\tau\\geq\\frac{D}{\\beta}.\n\\]\n\n合起来：\n\\[\n\\boxed{\\tau\\geq\\max\\left(\\frac{F}{P},\\frac{D}{\\beta}\\right)}.\n\\]\n\n```mermaid\nflowchart LR\n    F[\"运算次数 F ÷ 计算吞吐 P\"] --> TC[\"计算时间下界\"]\n    D[\"搬移字节 D ÷ 内存带宽 β\"] --> TM[\"搬移时间下界\"]\n    TC --> M[\"取较大值：整体耗时下界\"]\n    TM --> M\n```\n\n这里取最大值，是因为计算和数据搬移**可能重叠进行**。若不能重叠，耗时会更长；硬件利用率不足、启动和同步等也会增加时间。这个式子给出下界，并不保证实际达到。这也是 Roofline 性能模型的基本思路。[Roofline 原始技术报告](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2008/Archive/EECS-2008-134.pdf)\n\n看一个假设硬件上的例子：\n\\[\nP=100\\ \\mathrm{TFLOP/s},\\qquad\n\\beta=1\\ \\mathrm{TB/s}.\n\\]\n这里 T、G、M 分别表示 \\(10^{12},10^9,10^6\\)，MB 与此前的 MiB 不同。\n\n某项计算需要\n\\[\nF=2\\ \\mathrm{GFLOPs},\\qquad D=200\\ \\mathrm{MB}.\n\\]\n\n于是\n\\[\n\\frac{F}{P}\n=\\frac{2\\times10^9}{100\\times10^{12}}\n=20\\ \\mu s,\n\\]\n\\[\n\\frac{D}{\\beta}\n=\\frac{200\\times10^6}{10^{12}}\n=200\\ \\mu s.\n\\]\n\n整体时间下界为\n\\[\n\\boxed{\\max(20,200)=200\\ \\mu s}.\n\\]\n\n在这个模型中，数据搬移给出的约束更强。即使把运算次数减半，计算下界变成 \\(10\\ \\mu s\\)，整体下界仍是 \\(200\\ \\mu s\\)。\n\n反过来，如果运算次数不变，而**实际搬移量**降到 50 MB，整体下界就变为\n\\[\n\\max(20,50)=50\\ \\mu s.\n\\]\n\n这解释了 GQA 的一个潜在收益：**即使注意力乘法量没有按比例减少，减少 K/V 的实际读取仍可能改善速度。** 但缓存容量缩小四倍，不代表整个算子的搬移量或实际耗时都缩小四倍；其他数据访问、复用方式和计算约束仍然存在。\n\n两道理解检查题：\n\n1. 沿用 \\(P=100\\ \\mathrm{TFLOP/s}\\)、\\(\\beta=1\\ \\mathrm{TB/s}\\)。若 \\(F=10\\ \\mathrm{GFLOPs}\\)、\\(D=20\\ \\mathrm{MB}\\)，计算与搬移的时间下界各是多少？整体下界是多少？只把 \\(D\\) 减半，整体下界会改变吗？\n2. 某个 K 张量始终占 8 MB，但实现把它从显存完整读取了 3 次。不计其他读写，这部分显存读取流量是多少？能否直接用张量占用的 8 MB 代替 \\(D\\)？\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:113-114|note=[small lesson with checks and a static diagram]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 251
+    },
+    {
+      "id": 252,
+      "role": "user",
+      "content": "1. 分别是100微秒和20微秒，整体下界是100微秒，D减半整体下界不变；2. 显存流量为24MiB，不能直接代替D，我们继续",
+      "sequence": 252
+    },
+    {
+      "id": 253,
+      "role": "assistant",
+      "content": "第一题完全正确：计算与搬移下界分别为 \\(100\\ \\mu s\\)、\\(20\\ \\mu s\\)，整体下界为 \\(100\\ \\mu s\\)；只把 \\(D\\) 减半，下界不变。\n\n第二题的思路也正确，但单位需要改一下：原题是 **8 MB**，读取三次产生 **24 MB** 的流量，不是 24 MiB。这里\n\\[\n1\\ \\mathrm{MB}=10^6\\ \\text{字节},\\qquad\n1\\ \\mathrm{MiB}=2^{20}\\ \\text{字节}.\n\\]\n张量占用量不能直接代替累计流量 \\(D\\)。\n\n接下来学习 **3.9.7 算术强度：每搬运一个字节，做多少运算**。\n\n上次我们分别计算 \\(F/P\\) 和 \\(D/\\beta\\)。现在把运算量和搬移量合成一个比值：\n\\[\n\\boxed{I=\\frac{F}{D}},\n\\qquad \\text{单位为 FLOP/byte}.\n\\]\n\n这叫作**算术强度**。本节仍以显存与芯片之间的实际流量作为 \\(D\\)。Roofline 原文将这个边界下的比值称为 operational intensity，强调缓存复用会影响分母。[Roofline 原始技术报告 §3](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2008/Archive/EECS-2008-134.pdf)\n\n例如：\n\\[\nF=2\\times10^9\\ \\mathrm{FLOPs},\\qquad\nD=200\\times10^6\\ \\mathrm{bytes},\n\\]\n那么\n\\[\nI=10\\ \\mathrm{FLOP/byte}.\n\\]\n\n意思是：**整个计算平均每跨过该边界搬运 1 字节数据，就完成 10 次浮点运算。** 它是总体比值，不要求每个字节都恰好参与 10 次运算。\n\n**算术强度要与硬件的计算、带宽比例一起看。**\n\n比较两个时间下界：\n\\[\n\\frac{F/P}{D/\\beta}\n=\\frac{F/D}{P/\\beta}\n=\\frac{I}{P/\\beta}.\n\\]\n\n因此，分界点为\n\\[\n\\boxed{I_*=\\frac{P}{\\beta}}.\n\\]\n\n- \\(I<I_*\\)：搬移时间下界更大，模型中受**带宽约束**。\n- \\(I>I_*\\)：计算时间下界更大，模型中受**计算约束**。\n- \\(I=I_*\\)：两个下界相等。\n\n沿用假设硬件：\n\\[\nP=100\\ \\mathrm{TFLOP/s},\\qquad\n\\beta=1\\ \\mathrm{TB/s},\n\\]\n得到\n\\[\nI_*=\\frac{100\\times10^{12}}{10^{12}}\n=\\boxed{100\\ \\mathrm{FLOP/byte}}.\n\\]\n\n所以，刚才的 \\(I=10\\) 低于分界点。即使计算单元有很高的吞吐能力，当前数据供应速度给出的约束仍然更强。\n\n```mermaid\nflowchart TD\n    I[\"计算 I = F / D\"] --> C{\"与 P / β 比较\"}\n    C -->|\"小于\"| M[\"搬移时间下界更大：带宽约束\"]\n    C -->|\"等于\"| E[\"两个时间下界相等\"]\n    C -->|\"大于\"| P[\"计算时间下界更大：计算约束\"]\n```\n\n**同一关系，也可以写成每秒运算速度的上限。**\n\n内存每秒最多搬运 \\(\\beta\\) 字节，每字节对应 \\(I\\) 次运算，所以带宽能支撑的运算速率最多为 \\(\\beta I\\)。再加上计算单元自身的上限 \\(P\\)：\n\\[\n\\boxed{\\frac{F}{\\tau}\\leq\\min(P,\\beta I)}.\n\\]\n\n注意区别：之前是**耗时下界取最大值**，这里是**吞吐上限取最小值**。\n\n在上述硬件上：\n\n| 算术强度 \\(I\\)（FLOP/byte） | 带宽支撑的速率 \\(\\beta I\\) | 综合吞吐上限 |\n|---:|---:|---:|\n| 10 | 10 TFLOP/s | 10 TFLOP/s |\n| 40 | 40 TFLOP/s | 40 TFLOP/s |\n| 100 | 100 TFLOP/s | 100 TFLOP/s |\n| 500 | 500 TFLOP/s | 100 TFLOP/s |\n\n这里是理想上限，实际性能还可能受并行度、启动开销等限制；这些分类也不能替代实际测量。\n\n回到 GQA：如果实现让多个 query 头复用已经读入的 K/V，保持这部分注意力运算量不变，同时减少实际显存流量，那么 \\(I=F/D\\) 就会提高。对于原先受带宽约束的计算，这提供了改善速度的机会。**同一数学计算的算术强度可能随实现和缓存复用方式改变。**\n\n两道理解检查题：\n\n1. 仍取 \\(P=100\\ \\mathrm{TFLOP/s}\\)、\\(\\beta=1\\ \\mathrm{TB/s}\\)。某项计算有 \\(F=4\\ \\mathrm{GFLOPs}\\)、\\(D=80\\ \\mathrm{MB}\\)，算术强度是多少，哪个约束更强？如果保持 \\(F\\) 不变，把实际流量降到 20 MB，又会变成哪种约束？\n2. 对第一题中原来的 \\(F=4\\ \\mathrm{GFLOPs},D=80\\ \\mathrm{MB}\\)，只把硬件计算吞吐 \\(P\\) 翻倍，带宽不变。整体耗时下界会降低吗？为什么？\n\n<oai-mem-citation>\n<citation_entries>\nMEMORY.md:113-114|note=[small lesson with checks and a static diagram]\n</citation_entries>\n<rollout_ids>\n01a15e8f-d629-7f41-9201-366e581b50ac\n</rollout_ids>\n</oai-mem-citation>",
+      "channel": "final",
+      "sequence": 253
+    },
+    {
+      "id": 254,
+      "role": "user",
+      "content": "1. 算术强度是 50  \\mathrm{FLOP/byte} ， 带宽约束更大，实际流量降到 20 MB，会变成计算约束；2. 不会降低，因为访存耗时下界更大，翻倍硬件计算吞吐不会优化这一项。保存并上传commit",
+      "sequence": 254
+    },
+    {
+      "id": 255,
+      "role": "assistant",
+      "content": "两题都正确。原配置的耗时下界是 80 微秒；计算吞吐翻倍只会把计算项从 40 微秒降到 20 微秒，访存项仍是 80 微秒。\n\n我会保存答题结果和学习进度，将尚未提交的 3.9.4–3.9.7 正文与会话记录一起提交并推送。",
+      "channel": "commentary",
+      "sequence": 255
     }
   ],
   "sources": [
